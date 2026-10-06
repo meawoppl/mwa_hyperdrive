@@ -76,40 +76,69 @@ mod plotting {
     use log::{debug, info, warn};
     use marlu::Jones;
     use ndarray::prelude::*;
-    use rizzma::{artist::Rgba, Axes, Figure, GridSpec, RcParams};
+    use rizzma::{
+        artist::{Patch, Rgba},
+        core::{Affine2D, Path, PathCode},
+        mathtext::layout_rich_text,
+        text::FontSource,
+        Figure,
+    };
     use vec1::Vec1;
 
     use super::*;
     use crate::solutions::{ao, hyperdrive, CalSolutionType, CalibrationSolutions};
 
-    /// The plots are 3200x1800 pixels.
-    const WIDTH_INCHES: f64 = 16.0;
-    const HEIGHT_INCHES: f64 = 9.0;
-    const DPI: f64 = 200.0;
+    // The plots are 3200x1800 pixels. Everything is drawn in pixel coordinates
+    // (origin at the top left, as in an image) so that the output doesn't
+    // depend on rizzma's built-in decorations, which can't be tuned to match
+    // the layout that these plots have always had.
+    const WIDTH: i32 = 3200;
+    const HEIGHT: i32 = 1800;
+    const DPI: f64 = 100.0;
+    /// The height of the strip at the top of the plots that holds the title.
+    const TITLE_STRIP: i32 = 58;
+    /// The width of the dead margin to the left of the amplitude plots.
+    const AMPS_MARGIN: i32 = 15;
+    /// The height of the strip between a tile's name and its axis that holds
+    /// the x tick labels.
+    const X_LABEL_AREA: i32 = 15;
+    const TICK_LENGTH: i32 = 5;
+    const TICK_LABEL_EM: f64 = 9.6;
+    /// Pixels between the end of a tick and its label.
+    const X_LABEL_GAP: i32 = 5;
+    const Y_LABEL_GAP: i32 = 3;
 
-    const POLS: [(&str, Rgba); 4] = [
-        ("$g_X$", Rgba::BLUE),
+    /// Polarisation names, and their colours.
+    const POLS: [(&str, &str, Rgba); 4] = [
+        ("g", "X", Rgba::BLUE),
         (
-            "$D_X$",
+            "D",
+            "X",
             Rgba {
                 a: 0.2,
                 ..Rgba::BLUE
             },
         ),
         (
-            "$D_Y$",
+            "D",
+            "Y",
             Rgba {
                 a: 0.2,
                 ..Rgba::RED
             },
         ),
-        ("$g_Y$", Rgba::RED),
+        ("g", "Y", Rgba::RED),
     ];
     const FLAGGED: Rgba = Rgba {
         r: 220.0 / 255.0,
         g: 220.0 / 255.0,
         b: 220.0 / 255.0,
         a: 1.0,
+    };
+    /// Each grid line is translucent, so the crossings of two are darker.
+    const GRID: Rgba = Rgba {
+        a: 50.0 / 255.0,
+        ..Rgba::BLACK
     };
 
     pub(crate) fn plot_all_sol_files(args: SolutionsPlotArgs) -> Result<(), SolutionsPlotError> {
@@ -304,6 +333,7 @@ mod plotting {
             }
         };
 
+        let font = FontSource::dejavu_sans();
         let mut output_filenames = vec![];
         for timeblock in 0..num_timeblocks {
             let (output_amps, output_phases) = if num_timeblocks > 1 {
@@ -446,21 +476,24 @@ mod plotting {
                 }
             };
 
-            let mut amps_fig = new_figure(
+            let amps_ticks = Ticks::new(&font, min_amp, max_amp, 20);
+            let phases_ticks = Ticks::new(&font, -180.0, 180.0, 45);
+            let mut amps_plot = Plot::new(
                 &format!("Amps for {obs_name}"),
                 &meta_str,
-                tile_name_font_size,
+                &font,
+                AMPS_MARGIN,
                 ignore_cross_pols,
             );
-            let mut phases_fig = new_figure(
+            let mut phases_plot = Plot::new(
                 &format!("Phases for {obs_name}"),
                 &meta_str,
-                tile_name_font_size,
+                &font,
+                0,
                 ignore_cross_pols,
             );
-            let grid = GridSpec::new(num_rows, num_cols)
-                .with_margins(0.025, 0.995, 0.025, 0.93)
-                .with_spacing(0.1, 0.45);
+            let amps_cells = amps_plot.cells(num_rows, num_cols);
+            let phases_cells = phases_plot.cells(num_rows, num_cols);
             let num_plotted = total_num_tiles.min(num_rows * num_cols);
             for (i_tile, (amps, phases)) in amps
                 .outer_iter()
@@ -472,30 +505,26 @@ mod plotting {
                     Some(names) => format!("{}: {}", i_tile, names[i_tile]),
                     None => format!("{i_tile}"),
                 };
-                // Label the x axis where no tile sits below, and the y axis in
-                // the first column.
-                let labels = (i_tile + num_cols >= num_plotted, i_tile % num_cols == 0);
-                let cell = grid
-                    .subplot(i_tile / num_cols, i_tile % num_cols)
-                    .get_position(&grid);
-                let rect = (cell.x0, cell.y0, cell.width(), cell.height());
-                plot_tile(
-                    amps_fig.add_axes(rect.0, rect.1, rect.2, rect.3),
+                let first_column = i_tile % num_cols == 0;
+                amps_plot.tile(
+                    amps_cells[i_tile],
+                    first_column,
                     amps,
-                    (min_amp, max_amp),
+                    &amps_ticks,
                     &tile_name,
-                    labels,
-                    ignore_cross_pols,
+                    tile_name_font_size,
                 );
-                plot_tile(
-                    phases_fig.add_axes(rect.0, rect.1, rect.2, rect.3),
+                phases_plot.tile(
+                    phases_cells[i_tile],
+                    first_column,
                     phases,
-                    (-180.0, 180.0),
+                    &phases_ticks,
                     &tile_name,
-                    labels,
-                    ignore_cross_pols,
+                    tile_name_font_size,
                 );
             }
+            let amps_fig = amps_plot.into_figure();
+            let phases_fig = phases_plot.into_figure();
             amps_fig.save_png(&output_amps)?;
             phases_fig.save_png(&output_phases)?;
             output_filenames.push(output_amps);
@@ -505,94 +534,416 @@ mod plotting {
         Ok(output_filenames)
     }
 
-    /// A blank figure with the title, the timeblock metadata in the top left
-    /// and the polarisation colour key in the top right.
-    fn new_figure(
-        title: &str,
-        meta: &str,
-        tile_name_font_size: i32,
-        ignore_cross_pols: bool,
-    ) -> Figure {
-        // Font sizes are in points; convert from the pixel sizes used above.
-        let tick_size = 18.0 * 72.0 / DPI;
-        let mut fig = Figure::new(WIDTH_INCHES, HEIGHT_INCHES)
-            .with_dpi(DPI)
-            .with_rcparams(RcParams {
-                axes_titlesize: f64::from(tile_name_font_size) * 72.0 / DPI,
-                axes_titlepad: 2.0,
-                xtick_labelsize: tick_size,
-                ytick_labelsize: tick_size,
-                ..RcParams::default()
-            });
-        fig.suptitle(title);
-        let header = fig.add_axes(0.0, 0.0, 1.0, 1.0);
-        header.set_axis_off().set_xlim(0.0, 1.0).set_ylim(0.0, 1.0);
-        header.text(0.005, 0.975, meta);
-        for (i, (label, colour)) in POLS.iter().enumerate() {
-            if ignore_cross_pols && [1, 2].contains(&i) {
-                continue;
-            }
-            header.text_with_color(0.86 + 0.03 * i as f64, 0.975, *label, *colour);
-        }
-        fig
+    /// The pixel rectangle of one tile: `x1` and `y1` are exclusive.
+    #[derive(Clone, Copy)]
+    pub(super) struct Cell {
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
     }
 
-    /// Scatter one tile's four polarisations against channel, or grey the
-    /// tile out if every channel is flagged.
-    fn plot_tile(
-        ax: &mut Axes,
-        values: ArrayView1<[f64; 4]>,
-        (y_min, y_max): (f64, f64),
-        tile_name: &str,
-        (x_labels, y_labels): (bool, bool),
-        ignore_cross_pols: bool,
-    ) {
-        // A few ticks per axis keep the small panels legible.
-        let num_chans = values.len();
-        // The smallest 1, 2 or 5 times a power of ten giving at most 4 ticks.
-        let magnitude = 10_usize.pow((num_chans.max(1) as f64 / 4.0).log10().max(0.0) as u32);
-        let x_step = [1, 2, 5, 10]
-            .iter()
-            .map(|m| m * magnitude)
-            .find(|step| step * 4 >= num_chans)
-            .unwrap_or(10 * magnitude);
-        let x_ticks: Vec<f64> = (0..=num_chans).step_by(x_step).map(|c| c as f64).collect();
-        ax.set_title(tile_name)
-            .set_xlim(0.0, num_chans as f64)
-            .set_ylim(y_min, y_max)
-            .set_xticks(&x_ticks)
-            .set_yticks(&[y_min, (y_min + y_max) / 2.0, y_max]);
-        ax.xaxis_mut().set_tick_labels_visible(x_labels);
-        ax.yaxis_mut().set_tick_labels_visible(y_labels);
+    /// Split `total` pixels from `start` into `n` runs, giving the first few
+    /// runs the leftover pixels.
+    fn split_evenly(start: i32, total: i32, n: usize) -> Vec<(i32, i32)> {
+        let n = n as i32;
+        let (size, extra) = (total / n, total % n);
+        let mut pos = start;
+        (0..n)
+            .map(|i| {
+                let end = pos + size + i32::from(i < extra);
+                let run = (pos, end);
+                pos = end;
+                run
+            })
+            .collect()
+    }
 
-        if values.iter().all(|v| v.iter().any(|f| f.is_nan())) {
-            ax.set_facecolor(FLAGGED);
-            return;
+    /// Round-number tick positions between `min` and `max`, using at most
+    /// `max_points` of them, and no step smaller than `min_step`.
+    fn key_points(min: f64, max: f64, max_points: usize, min_step: f64) -> (Vec<f64>, f64) {
+        let (lo, hi) = (min.min(max), min.max(max));
+        if lo == hi {
+            return (vec![lo], 1.0);
+        }
+        let span = hi - lo;
+        let mut scale = 10.0_f64.powf(span.log10().floor());
+        if 1 + (span / scale).floor() as usize > max_points {
+            scale *= 10.0;
+        }
+        'refine: loop {
+            let coarse = scale;
+            for divisor in [2.0, 5.0, 10.0] {
+                let step = coarse / divisor;
+                let first = lo + step - lo.rem_euclid(step);
+                let last = hi - hi.rem_euclid(step);
+                let num_points = 1 + ((last - first) / coarse * divisor) as usize;
+                if step < min_step || num_points > max_points {
+                    break 'refine;
+                }
+                scale = step;
+            }
+            scale = coarse / 10.0;
+        }
+        let scale = scale.max(min_step);
+        let first = (lo / scale).ceil() as i64;
+        let last = (hi / scale).floor() as i64;
+        ((first..=last).map(|i| i as f64 * scale).collect(), scale)
+    }
+
+    /// Tick positions with their labels, as the y axis of every tile shows.
+    pub(super) struct Ticks {
+        min: f64,
+        max: f64,
+        ticks: Vec<(f64, String)>,
+        label_width: f64,
+        /// The least width, in pixels, of the area left of the first column.
+        min_label_area: i32,
+    }
+
+    impl Ticks {
+        fn new(font: &FontSource, min: f64, max: f64, min_label_area: i32) -> Ticks {
+            let (points, scale) = key_points(min, max, 10, 0.0);
+            let decimals = (-scale.log10()).ceil().max(1.0) as i32;
+            let ticks: Vec<(f64, String)> = points
+                .into_iter()
+                .map(|p| {
+                    let factor = 10.0_f64.powi(decimals);
+                    let rounded = (p * factor).round() / factor;
+                    (p, format!("{rounded:?}"))
+                })
+                .collect();
+            let label_width = ticks
+                .iter()
+                .map(|(_, l)| layout_rich_text(font, l, TICK_LABEL_EM).width)
+                .fold(0.0, f64::max);
+            Ticks {
+                min,
+                max,
+                ticks,
+                label_width,
+                min_label_area,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum Align {
+        Left,
+        Centre,
+        Right,
+    }
+
+    /// Filled shapes of one colour. Rectangles are given in pixels (with the
+    /// origin at the top left and the end exclusive) so they are drawn crisply.
+    #[derive(Default)]
+    struct Layer {
+        vertices: Vec<[f64; 2]>,
+        codes: Vec<PathCode>,
+    }
+
+    impl Layer {
+        fn rect(&mut self, x0: i32, y0: i32, x1: i32, y1: i32) {
+            // rizzma's y axis points up.
+            let (x0, x1) = (f64::from(x0), f64::from(x1));
+            let (y0, y1) = (f64::from(HEIGHT - y1), f64::from(HEIGHT - y0));
+            self.vertices
+                .extend([[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]);
+            self.codes.extend([
+                PathCode::MoveTo,
+                PathCode::LineTo,
+                PathCode::LineTo,
+                PathCode::LineTo,
+                PathCode::ClosePoly,
+            ]);
         }
 
-        for (pol_index, (_, colour)) in POLS.iter().enumerate() {
-            let cross_pol = [1, 2].contains(&pol_index);
-            if cross_pol && ignore_cross_pols {
-                continue;
+        fn text(
+            &mut self,
+            font: &FontSource,
+            text: &str,
+            em: f64,
+            x: f64,
+            baseline: f64,
+            align: Align,
+        ) {
+            let rich = layout_rich_text(font, text, em);
+            let x = match align {
+                Align::Left => x,
+                Align::Centre => x - rich.width / 2.0,
+                Align::Right => x - rich.width,
+            };
+            let shift = Affine2D::from_translation(x, f64::from(HEIGHT) - baseline);
+            for path in &rich.paths {
+                let path = path.transformed(&shift);
+                match path.codes() {
+                    Some(codes) => self.codes.extend_from_slice(codes),
+                    None => self.codes.extend(
+                        std::iter::once(PathCode::MoveTo)
+                            .chain(std::iter::repeat(PathCode::LineTo))
+                            .take(path.vertices().len()),
+                    ),
+                }
+                self.vertices.extend_from_slice(path.vertices());
             }
-            let (x, y): (Vec<f64>, Vec<f64>) = values
-                .iter()
-                .enumerate()
-                .map(|(i, v)| (i as f64, v[pol_index]))
-                .filter(|(_, y)| !y.is_nan())
-                .unzip();
-            // Gains are filled dots, leakages hollow rings.
-            let points = ax.scatter(&x, &y);
-            *points = if cross_pol {
-                points
-                    .clone()
-                    .with_facecolors(vec![Rgba { a: 0.0, ..*colour }])
-                    .with_edgecolors(vec![*colour])
-                    .linewidth(0.5)
+        }
+
+        fn into_patch(self, colour: Rgba, zorder: f64) -> Option<Patch> {
+            if self.vertices.is_empty() {
+                return None;
+            }
+            Some(
+                Patch::new(Path::new(self.vertices, Some(self.codes)))
+                    .facecolor(Some(colour))
+                    .edgecolor(None)
+                    .with_zorder(zorder),
+            )
+        }
+    }
+
+    /// A whole plot, built up in layers that are drawn from the bottom up.
+    pub(super) struct Plot<'a> {
+        font: &'a FontSource,
+        x_offset: i32,
+        ignore_cross_pols: bool,
+        grid: [Layer; 2],
+        flagged: Layer,
+        markers: [Layer; 4],
+        ink: Layer,
+        legend: [Layer; 4],
+    }
+
+    impl<'a> Plot<'a> {
+        /// Start a plot with the title, the timeblock metadata in the top left
+        /// and the polarisation colour key in the top right. The tiles start
+        /// `x_offset` pixels from the left.
+        fn new(
+            title: &str,
+            meta: &str,
+            font: &'a FontSource,
+            x_offset: i32,
+            ignore_cross_pols: bool,
+        ) -> Plot<'a> {
+            let mut plot = Plot {
+                font,
+                x_offset,
+                ignore_cross_pols,
+                grid: Default::default(),
+                flagged: Layer::default(),
+                markers: Default::default(),
+                ink: Layer::default(),
+                legend: Default::default(),
+            };
+            let centre = f64::from(x_offset + (WIDTH - x_offset) / 2);
+            plot.ink
+                .text(font, title, 48.4, centre, 42.5, Align::Centre);
+            plot.ink.text(font, meta, 30.66, 10.0, 34.0, Align::Left);
+            for (i, (first, second, _)) in POLS.iter().enumerate() {
+                let x = f64::from(WIDTH - 500 + 80 * i as i32);
+                plot.legend[i].text(font, first, 40.0, x, 42.0, Align::Left);
+                plot.legend[i].text(font, second, 28.0, x + 30.0, 52.0, Align::Left);
+            }
+            plot
+        }
+
+        /// The cells that the tiles occupy, in row-major order.
+        fn cells(&self, num_rows: usize, num_cols: usize) -> Vec<Cell> {
+            let rows = split_evenly(TITLE_STRIP, HEIGHT - TITLE_STRIP, num_rows);
+            let cols = split_evenly(self.x_offset, WIDTH - self.x_offset, num_cols);
+            rows.iter()
+                .flat_map(|&(y0, y1)| cols.iter().map(move |&(x0, x1)| Cell { x0, y0, x1, y1 }))
+                .collect()
+        }
+
+        /// Scatter one tile's four polarisations against channel, or grey the
+        /// tile out if every channel is flagged. Only the first column of
+        /// tiles has a y axis.
+        fn tile(
+            &mut self,
+            cell: Cell,
+            first_column: bool,
+            values: ArrayView1<[f64; 4]>,
+            y_ticks: &Ticks,
+            name: &str,
+            font_size: i32,
+        ) {
+            let font = self.font;
+            let num_chans = values.len() as i32;
+            let em = 0.8 * f64::from(font_size);
+            // The title, centred over the whole cell.
+            self.ink.text(
+                font,
+                name,
+                em,
+                f64::from(cell.x0 + cell.x1) / 2.0,
+                f64::from(cell.y0) + 1.066 * em,
+                Align::Centre,
+            );
+
+            // The axes sit on the top and left of the plotting area.
+            let y_axis = cell.y0 + (1.2 * f64::from(font_size)) as i32 + X_LABEL_AREA;
+            let y_label_width = if first_column {
+                (y_ticks.label_width.ceil() as i32 + TICK_LENGTH + Y_LABEL_GAP + 2)
+                    .max(y_ticks.min_label_area)
             } else {
-                points.clone().with_facecolors(vec![*colour])
+                0
+            };
+            let (left, right) = (cell.x0 + y_label_width, cell.x1);
+            let (top, bottom) = (y_axis + 1, cell.y1);
+            self.ink.rect(left, y_axis, right, y_axis + 1);
+            if first_column {
+                self.ink.rect(left - 1, top, left, bottom);
             }
-            .with_sizes(vec![2.0]);
+
+            // Plotters' coordinate mapping: truncate to a whole pixel.
+            let width = f64::from(right - 1 - left);
+            let height = f64::from(bottom - 1 - top);
+            let map_x = |v: f64| left + (width * v / f64::from(num_chans) + 1e-3).floor() as i32;
+            let map_y = |v: f64| {
+                let frac = (v - y_ticks.min) / (y_ticks.max - y_ticks.min);
+                bottom - 1 - (height * frac + 1e-3).floor() as i32
+            };
+
+            let (x_points, _) = key_points(0.0, f64::from(num_chans), 10, 1.0);
+            for v in x_points {
+                let x = map_x(v);
+                self.grid[0].rect(x, top + 1, x + 1, bottom - 1);
+                self.ink.rect(x, y_axis - TICK_LENGTH, x + 1, y_axis);
+                self.ink.text(
+                    font,
+                    &format!("{v}"),
+                    TICK_LABEL_EM,
+                    f64::from(x),
+                    f64::from(y_axis - TICK_LENGTH - X_LABEL_GAP),
+                    Align::Centre,
+                );
+            }
+            for (v, label) in &y_ticks.ticks {
+                let y = map_y(*v);
+                self.grid[1].rect(left, y, right, y + 1);
+                if first_column {
+                    self.ink.rect(left - 1 - TICK_LENGTH, y, left - 1, y + 1);
+                    self.ink.text(
+                        font,
+                        label,
+                        TICK_LABEL_EM,
+                        f64::from(left - 1 - TICK_LENGTH - Y_LABEL_GAP),
+                        f64::from(y) + 0.5 + 0.5 * 0.729 * TICK_LABEL_EM,
+                        Align::Right,
+                    );
+                }
+            }
+
+            if values.iter().all(|v| v.iter().any(|f| f.is_nan())) {
+                self.flagged.rect(left, top, right, bottom);
+                return;
+            }
+
+            for pol_index in 0..4 {
+                let cross_pol = [1, 2].contains(&pol_index);
+                if cross_pol && self.ignore_cross_pols {
+                    continue;
+                }
+                let mut pixels = std::collections::BTreeSet::new();
+                for (i, v) in values.iter().enumerate() {
+                    let y = v[pol_index];
+                    if y.is_nan() {
+                        continue;
+                    }
+                    let (x, y) = (map_x(i as f64), map_y(y));
+                    // Gains are plus signs, leakages hollow diamonds.
+                    let offsets: &[(i32, i32)] = if cross_pol {
+                        &[(-1, 0), (1, 0), (0, -1), (0, 1)]
+                    } else {
+                        &[(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]
+                    };
+                    pixels.extend(
+                        offsets
+                            .iter()
+                            .map(|(dx, dy)| (x + dx, y + dy))
+                            .filter(|&(x, y)| x >= left && x < right && y >= top && y < bottom),
+                    );
+                }
+                for (x, y) in pixels {
+                    self.markers[pol_index].rect(x, y, x + 1, y + 1);
+                }
+            }
+        }
+
+        fn into_figure(self) -> Figure {
+            let mut fig =
+                Figure::new(f64::from(WIDTH) / DPI, f64::from(HEIGHT) / DPI).with_dpi(DPI);
+            let ax = fig.add_axes(0.0, 0.0, 1.0, 1.0);
+            ax.set_axis_off()
+                .set_xlim(0.0, f64::from(WIDTH))
+                .set_ylim(0.0, f64::from(HEIGHT))
+                .set_facecolor(Rgba::TRANSPARENT);
+            let [grid_x, grid_y] = self.grid;
+            let mut layers = vec![(grid_x, GRID), (grid_y, GRID), (self.flagged, FLAGGED)];
+            for (i, layer) in self.markers.into_iter().enumerate() {
+                if !(self.ignore_cross_pols && [1, 2].contains(&i)) {
+                    layers.push((layer, POLS[i].2));
+                }
+            }
+            layers.push((self.ink, Rgba::BLACK));
+            for (i, layer) in self.legend.into_iter().enumerate() {
+                if !(self.ignore_cross_pols && [1, 2].contains(&i)) {
+                    layers.push((layer, POLS[i].2));
+                }
+            }
+            for (z, (layer, colour)) in layers.into_iter().enumerate() {
+                if let Some(patch) = layer.into_patch(colour, z as f64) {
+                    ax.add_patch(patch);
+                }
+            }
+            fig
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_key_points() {
+            let (points, scale) = key_points(-180.0, 180.0, 10, 0.0);
+            assert_eq!(points, [-150.0, -100.0, -50.0, 0.0, 50.0, 100.0, 150.0]);
+            assert_eq!(scale, 50.0);
+
+            let (points, _) = key_points(0.0, 32.0, 10, 1.0);
+            assert_eq!(points, [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0]);
+
+            // Channels are whole numbers, so never get ticks between them.
+            let (points, _) = key_points(0.0, 4.0, 10, 1.0);
+            assert_eq!(points, [0.0, 1.0, 2.0, 3.0, 4.0]);
+
+            let (points, scale) = key_points(0.0, 1.0, 10, 0.0);
+            assert_eq!(points.len(), 11);
+            assert_eq!(scale, 0.1);
+        }
+
+        #[test]
+        fn test_tick_labels() {
+            let font = FontSource::dejavu_sans();
+            let labels = |min, max| {
+                Ticks::new(&font, min, max, 0)
+                    .ticks
+                    .into_iter()
+                    .map(|(_, l)| l)
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(labels(-180.0, 180.0)[..2], ["-150.0", "-100.0"]);
+            assert_eq!(labels(0.0, 1.0)[..3], ["0.0", "0.1", "0.2"]);
+        }
+
+        #[test]
+        fn test_split_evenly() {
+            // The first runs get the leftover pixels.
+            let runs = split_evenly(58, 1742, 10);
+            assert_eq!(runs[0], (58, 233));
+            assert_eq!(runs[1], (233, 408));
+            assert_eq!(runs[2], (408, 582));
+            assert_eq!(runs[9].1, 1800);
         }
     }
 }
