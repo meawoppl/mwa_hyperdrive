@@ -6,14 +6,15 @@
 //!
 //! Anything here is to supplement mwalib.
 
-use std::{collections::HashMap, ffi::CString};
+use std::collections::HashMap;
 
-use fitsio::errors::check_status as fits_check_status;
 use log::debug;
 use mwalib::{MetafitsContext, Pol};
 use ndarray::prelude::*;
 
-use crate::io::read::fits::{fits_open, fits_open_hdu, fits_read_cell_f64_array, FitsError};
+use crate::io::read::fits::{
+    fits_find_col, fits_open, fits_open_hdu, fits_read_cell_f64_array, FitsError,
+};
 
 /// The column to search for dipole gains.
 const COL_NAME: &str = "DipAmps";
@@ -51,37 +52,14 @@ pub(crate) fn get_dipole_gains(context: &MetafitsContext) -> Array2<f64> {
     // we expect the associated metafits file to still exist and be accessible.
     let mut m = fits_open(&context.metafits_filename).unwrap();
     let hdu = fits_open_hdu(&mut m, 1).unwrap();
-    let mut dip_amps_col_exists = false;
-
-    unsafe {
-        let col_name_cstr = CString::new(COL_NAME).unwrap().into_raw();
-        let mut i_col = 0;
-        let mut status = 0;
-        // ffgcno = fits_get_colnum
-        fitsio_sys::ffgcno(
-            m.as_raw(),    /* I - FITS file pionter                       */
-            1,             /* I - case sensitive string comparison? 0=no  */
-            col_name_cstr, /* I - input name of column (w/wildcards)      */
-            &mut i_col,    /* O - number of the named column; 1=first col */
-            &mut status,   /* IO - error status                           */
-        );
-        match status {
-            // 219 = named column not found
-            219 => (),
-            _ => {
-                fits_check_status(status)
-                    .map_err(|err| FitsError::ReadCellArray {
-                        col_name: COL_NAME,
-                        hdu_num: hdu.number + 1,
-                        err: Box::new(err),
-                    })
-                    .unwrap();
-                dip_amps_col_exists = true;
-            }
-        };
-        // Don't leak the `CString`.
-        drop(CString::from_raw(col_name_cstr));
-    }
+    let dip_amps_col_exists = fits_find_col(&hdu, COL_NAME, true)
+        .map_err(|err| FitsError::ReadCellArray {
+            col_name: COL_NAME,
+            hdu_num: hdu.number + 1,
+            err: Box::new(err),
+        })
+        .unwrap()
+        .is_some();
 
     // If we found the "DipAmps" column, use that for the dipole gains.
     if dip_amps_col_exists {

@@ -15,8 +15,9 @@ use std::{
 
 use fitsio::{
     errors::check_status as fits_check_status,
+    hdu::FitsHdu,
     images::{ImageDescription, ImageType},
-    tables::{ColumnDataType, ColumnDescription},
+    tables::{ColumnDataType, ColumnDescription, ReadsCol},
     FitsFile,
 };
 use hifitime::Epoch;
@@ -30,8 +31,8 @@ use super::{error::*, CalibrationSolutions};
 use crate::beam::BeamType;
 use crate::io::read::{
     fits::{
-        fits_get_image, fits_get_optional_key, fits_get_optional_key_long_string,
-        fits_get_required_key, fits_open, fits_open_hdu,
+        fits_find_col, fits_get_image, fits_get_optional_key, fits_get_optional_key_long_string,
+        fits_get_required_key, fits_open, fits_open_hdu, fits_read_cell_array,
     },
     pfb_gains::PfbFlavour,
     RawDataCorrections,
@@ -326,143 +327,10 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
                     },
                 };
 
-                let dipole_gains = {
-                    // It's more effort than I care to expend to read the
-                    // array-in-a-column values via fitsio, so I'm using
-                    // fitsio-sys.
-
-                    let mut status = 0;
-                    let mut array: Array1<f64> = Array1::zeros(32);
-                    let mut dipole_gains = Some(Array2::zeros((total_num_tiles, 32)));
-
-                    let i_col = unsafe {
-                        let col_name = CString::new("DipoleGains").unwrap().into_raw();
-                        let mut i_col = 0;
-
-                        // ffgcno = fits_get_colnum
-                        fitsio_sys::ffgcno(
-                            fptr.as_raw(), /* I - FITS file pionter                       */
-                            1,             /* I - case sensitive string comparison? 0=no  */
-                            col_name,      /* I - input name of column (w/wildcards)      */
-                            &mut i_col,    /* O - number of the named column; 1=first col */
-                            &mut status,   /* IO - error status                           */
-                        );
-                        let i_col = match status {
-                            // 219 = named column not found
-                            219 => None,
-                            _ => {
-                                fits_check_status(status)?;
-                                Some(i_col)
-                            }
-                        };
-
-                        drop(CString::from_raw(col_name));
-                        i_col
-                    };
-
-                    if let Some(i_col) = i_col {
-                        for i_tile in 0..total_num_tiles {
-                            unsafe {
-                                // ffgcv = fits_read_col
-                                fitsio_sys::ffgcv(
-                                    fptr.as_raw(),
-                                    82, // TDOUBLE (fitsio.h)
-                                    i_col,
-                                    i_tile as i64 + 1,
-                                    1,
-                                    32,
-                                    std::ptr::null_mut(),
-                                    array.as_mut_ptr().cast(),
-                                    &mut 0,
-                                    &mut status,
-                                );
-                            }
-                            match status {
-                                // Status code 301 means "unavailable". 302 is "column number < 1 or > tfields"; in other
-                                // words, the column doesn't exist.
-                                301 | 302 => {
-                                    dipole_gains = None;
-                                    break;
-                                }
-                                _ => fits_check_status(status)?,
-                            }
-
-                            dipole_gains
-                                .as_mut()
-                                .unwrap()
-                                .slice_mut(s![i_tile, ..])
-                                .assign(&array);
-                        }
-                    }
-                    dipole_gains
-                };
-
-                let dipole_delays = {
-                    let mut status = 0;
-                    let mut array: Array1<u32> = Array1::zeros(16);
-                    let mut dipole_delays = Some(Array2::zeros((total_num_tiles, 16)));
-
-                    let i_col = unsafe {
-                        let col_name = CString::new("DipoleDelays").unwrap().into_raw();
-                        let mut i_col = 0;
-
-                        // ffgcno = fits_get_colnum
-                        fitsio_sys::ffgcno(
-                            fptr.as_raw(), /* I - FITS file pionter                       */
-                            1,             /* I - case sensitive string comparison? 0=no  */
-                            col_name,      /* I - input name of column (w/wildcards)      */
-                            &mut i_col,    /* O - number of the named column; 1=first col */
-                            &mut status,   /* IO - error status                           */
-                        );
-                        let i_col = match status {
-                            // 219 = named column not found
-                            219 => None,
-                            _ => {
-                                fits_check_status(status)?;
-                                Some(i_col)
-                            }
-                        };
-
-                        drop(CString::from_raw(col_name));
-                        i_col
-                    };
-
-                    if let Some(i_col) = i_col {
-                        for i_tile in 0..total_num_tiles {
-                            unsafe {
-                                // ffgcv = fits_read_col
-                                fitsio_sys::ffgcv(
-                                    fptr.as_raw(),
-                                    30, // TUINT (fitsio.h)
-                                    i_col,
-                                    i_tile as i64 + 1,
-                                    1,
-                                    16,
-                                    std::ptr::null_mut(),
-                                    array.as_mut_ptr().cast(),
-                                    &mut 0,
-                                    &mut status,
-                                );
-                            }
-                            match status {
-                                // Status code 301 means "unavailable". 302 is "column number < 1 or > tfields"; in other
-                                // words, the column doesn't exist.
-                                301 | 302 => {
-                                    dipole_delays = None;
-                                    break;
-                                }
-                                _ => fits_check_status(status)?,
-                            }
-
-                            dipole_delays
-                                .as_mut()
-                                .unwrap()
-                                .slice_mut(s![i_tile, ..])
-                                .assign(&array);
-                        }
-                    }
-                    dipole_delays
-                };
+                let dipole_gains =
+                    read_tile_cells::<f64, 32>(&mut fptr, &hdu, "DipoleGains", total_num_tiles)?;
+                let dipole_delays =
+                    read_tile_cells::<u32, 16>(&mut fptr, &hdu, "DipoleDelays", total_num_tiles)?;
 
                 (
                     tile_names,
@@ -561,6 +429,33 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
     })
 }
 
+/// Read the `N` values of each tile's row of the TILES column `col_name`, or
+/// `None` if there is no such column.
+fn read_tile_cells<T: ReadsCol + Clone + num_traits::Zero, const N: usize>(
+    fptr: &mut FitsFile,
+    hdu: &FitsHdu,
+    col_name: &str,
+    total_num_tiles: usize,
+) -> Result<Option<Array2<T>>, SolutionsReadError> {
+    let Some(col_desc) = fits_find_col(hdu, col_name, true)? else {
+        return Ok(None);
+    };
+    let mut cells = Array2::zeros((total_num_tiles, N));
+    for (i_tile, mut cell) in cells.outer_iter_mut().enumerate() {
+        match fits_read_cell_array::<T>(fptr, hdu, col_desc, i_tile, N) {
+            Ok(values) => cell.assign(&ArrayView1::from(&values)),
+            // Status code 301 means "unavailable". 302 is "column number < 1
+            // or > tfields"; in other words, the column doesn't exist.
+            Err(fitsio::errors::Error::Fits(fitsio::errors::FitsError {
+                status: 301 | 302,
+                ..
+            })) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(Some(cells))
+}
+
 pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), SolutionsWriteError> {
     if file.exists() {
         std::fs::remove_file(file)?;
@@ -620,20 +515,11 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
 
     // Write the obsid if we can.
     if let Some(obsid) = obsid {
-        unsafe {
-            let key_name = CString::new("OBSID").unwrap();
-            let value = CString::new(obsid.to_string()).unwrap();
-            let comment = CString::new("The MWA observation ID").unwrap();
-            // ffpkys = fits_write_key_str
-            fitsio_sys::ffpkys(
-                fptr.as_raw(),     /* I - FITS file pointer        */
-                key_name.as_ptr(), /* I - name of keyword to write */
-                value.as_ptr(),    /* I - keyword value            */
-                comment.as_ptr(),  /* I - keyword comment          */
-                &mut status,       /* IO - error status            */
-            );
-            fits_check_status(status)?;
-        }
+        hdu.write_key(
+            &mut fptr,
+            "OBSID",
+            (obsid.to_string(), "The MWA observation ID"),
+        )?;
     }
 
     if let Some(raw_data_corrections) = raw_data_corrections {

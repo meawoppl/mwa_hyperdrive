@@ -126,3 +126,19 @@ pub(crate) fn get_reduced_1090008640_uvfits_pbs() -> DataAsPathBufs {
         .join("1090008640.uvfits");
     data
 }
+
+/// Overwrite `TileName` cells in the TILEDATA table of the metafits file
+/// `metafits`. Each `(row, name)` names rows `row` and `row + 1` (0-indexed),
+/// a tile's two RF inputs.
+pub(crate) fn set_metafits_tile_names(metafits: &Path, names: &[(usize, &str)]) {
+    let mut fptr = fitsio::FitsFile::edit(metafits).unwrap();
+    let hdu = fptr.hdu(1).unwrap();
+    // fitsio's write_col_range for strings indexes its data by row, so write
+    // the whole column.
+    let mut tile_names: Vec<String> = hdu.read_col(&mut fptr, "TileName").unwrap();
+    for &(row, name) in names {
+        tile_names[row] = name.to_string();
+        tile_names[row + 1] = name.to_string();
+    }
+    hdu.write_col(&mut fptr, "TileName", &tile_names).unwrap();
+}

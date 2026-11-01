@@ -11,11 +11,14 @@ pub(crate) use error::FitsError;
 use std::{
     ffi::{CStr, CString},
     fmt::Display,
-    os::raw::c_char,
     ptr,
 };
 
-use fitsio::{hdu::*, FitsFile};
+use fitsio::{
+    hdu::*,
+    tables::{ConcreteColumnDescription, ReadsCol},
+    FitsFile,
+};
 
 /// Open a fits file.
 #[track_caller]
@@ -335,52 +338,77 @@ pub(crate) fn _fits_get_float_image_into_buffer(
 /// must be pointed at data containing f64s (i.e. TDOUBLE).
 #[track_caller]
 pub(crate) fn fits_read_cell_f64_array<const NUM_ELEM: usize>(
-    fits_ptr: &mut fitsio::FitsFile,
-    hdu: &fitsio::hdu::FitsHdu,
+    fits_ptr: &mut FitsFile,
+    hdu: &FitsHdu,
     col_name: &'static str,
     row: i64,
 ) -> Result<[f64; NUM_ELEM], FitsError> {
-    unsafe {
-        // With the column name, get the column number.
-        let mut status = 0;
-        let mut col_num = -1;
-        let keyword = std::ffi::CString::new(col_name).expect("CString::new failed");
-        // ffgcno = fits_get_colnum
-        fitsio_sys::ffgcno(
-            fits_ptr.as_raw(),
-            0,
-            keyword.as_ptr() as *mut c_char,
-            &mut col_num,
-            &mut status,
-        );
-        // Check the status.
-        fitsio::errors::check_status(status).map_err(|err| FitsError::ReadCellArray {
-            col_name,
-            hdu_num: hdu.number + 1,
-            err: Box::new(err),
-        })?;
+    let to_fits_error = |err| FitsError::ReadCellArray {
+        col_name,
+        hdu_num: hdu.number + 1,
+        err: Box::new(err),
+    };
+    // 219 = COL_NOT_FOUND, as ffgcno reports it.
+    let col_desc = fits_find_col(hdu, col_name, false)
+        .map_err(to_fits_error)?
+        .ok_or_else(|| to_fits_error(col_not_found()))?;
+    let row = usize::try_from(row).expect("row is not negative");
+    let values = fits_read_cell_array::<f64>(fits_ptr, hdu, col_desc, row, NUM_ELEM)
+        .map_err(to_fits_error)?;
+    let mut array = [0.0; NUM_ELEM];
+    array.copy_from_slice(&values);
+    Ok(array)
+}
 
-        // Now get the specified row from that column.
-        let mut array = [0.0; NUM_ELEM];
-        // ffgcv = fits_read_col
-        fitsio_sys::ffgcv(
-            fits_ptr.as_raw(),
-            82, // TDOUBLE (fitsio.h)
-            col_num,
-            row + 1,
-            1,
-            NUM_ELEM.try_into().expect("not larger than i64::MAX"),
-            std::ptr::null_mut(),
-            array.as_mut_ptr().cast(),
-            &mut 0,
-            &mut status,
-        );
-        fitsio::errors::check_status(status).map_err(|err| FitsError::ReadCellArray {
-            col_name,
-            hdu_num: hdu.number + 1,
-            err: Box::new(err),
-        })?;
+/// The error cfitsio gives for a column that doesn't exist (`COL_NOT_FOUND`).
+pub(crate) fn col_not_found() -> fitsio::errors::Error {
+    fitsio::errors::check_status(219).expect_err("219 is an error status")
+}
 
-        Ok(array)
+/// Find the table column `col_name` as cfitsio's `ffgcno` does, matching case
+/// or not, and return its description. A name that matches no column is
+/// `None`; one that matches more than one is `COL_NOT_UNIQUE` (237).
+pub(crate) fn fits_find_col<'a>(
+    hdu: &'a FitsHdu,
+    col_name: &str,
+    case_sensitive: bool,
+) -> Result<Option<&'a ConcreteColumnDescription>, fitsio::errors::Error> {
+    let HduInfo::TableInfo {
+        column_descriptions,
+        ..
+    } = &hdu.info
+    else {
+        // NOT_TABLE
+        return Err(fitsio::errors::check_status(235).expect_err("235 is an error status"));
+    };
+    let mut matches = column_descriptions.iter().filter(|desc| {
+        if case_sensitive {
+            desc.name == col_name
+        } else {
+            desc.name.eq_ignore_ascii_case(col_name)
+        }
+    });
+    match (matches.next(), matches.next()) {
+        (Some(desc), None) => Ok(Some(desc)),
+        (None, _) => Ok(None),
+        (Some(_), Some(_)) => {
+            Err(fitsio::errors::check_status(237).expect_err("237 is an error status"))
+        }
     }
+}
+
+/// Read `n_elem` values of the column `col_desc` from row `row` (0-indexed)
+/// on, as cfitsio's `ffgcv` reads them: a read longer than a row runs on into
+/// the following rows.
+pub(crate) fn fits_read_cell_array<T: ReadsCol>(
+    fits_ptr: &mut FitsFile,
+    hdu: &FitsHdu,
+    col_desc: &ConcreteColumnDescription,
+    row: usize,
+    n_elem: usize,
+) -> Result<Vec<T>, fitsio::errors::Error> {
+    let num_rows = n_elem.div_ceil(col_desc.data_type.repeat.max(1)).max(1);
+    let mut values = hdu.read_col_range(fits_ptr, &col_desc.name, &(row..row + num_rows))?;
+    values.truncate(n_elem);
+    Ok(values)
 }

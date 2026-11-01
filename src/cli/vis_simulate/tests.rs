@@ -61,43 +61,19 @@ fn get_reduced_1090008640(
 
 fn read_uvfits_stabxyz(
     fptr: &mut fitsio::FitsFile,
-    _hdu: &fitsio::hdu::FitsHdu,
+    hdu: &fitsio::hdu::FitsHdu,
     num_tiles: usize,
 ) -> Vec<XyzGeodetic> {
-    unsafe {
-        // With the column name, get the column number.
-        let mut status = 0;
-        let mut col_num = -1;
-        let keyword = std::ffi::CString::new("STABXYZ").unwrap();
-        // ffgcno = fits_get_colnum
-        fitsio_sys::ffgcno(
-            fptr.as_raw(),
-            0,
-            keyword.as_ptr() as *mut std::os::raw::c_char,
-            &mut col_num,
-            &mut status,
-        );
-        assert_eq!(status, 0, "Status wasn't 0");
-
-        // Now get the column data.
-        let mut array = vec![XyzGeodetic::default(); num_tiles];
-        let array_ptr = array.as_mut_ptr();
-        // ffgcv = fits_read_col
-        fitsio_sys::ffgcv(
-            fptr.as_raw(),
-            82, // TDOUBLE
-            col_num,
-            1,
-            1,
-            (num_tiles * 3) as i64,
-            std::ptr::null_mut(),
-            array_ptr as *mut core::ffi::c_void,
-            &mut 0,
-            &mut status,
-        );
-        assert_eq!(status, 0, "Status wasn't 0");
-        array
-    }
+    let xyz: Vec<f64> = hdu
+        .read_col_range(fptr, "STABXYZ", &(0..num_tiles))
+        .unwrap();
+    xyz.chunks_exact(3)
+        .map(|xyz| XyzGeodetic {
+            x: xyz[0],
+            y: xyz[1],
+            z: xyz[2],
+        })
+        .collect()
 }
 
 #[test]
