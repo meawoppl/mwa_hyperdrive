@@ -13,7 +13,7 @@ pub enum FitsError {
         "{source_file}:{source_line}:{source_column}: Couldn't open {fits_filename}: {fits_error}"
     )]
     Open {
-        fits_error: Box<fitsio::errors::Error>,
+        fits_error: Box<crate::fitsio::errors::Error>,
         fits_filename: Box<Path>,
         source_file: &'static str,
         source_line: u32,
@@ -57,7 +57,7 @@ pub enum FitsError {
         "{source_file}:{source_line}:{source_column}: {fits_filename} HDU '{hdu_description}': {fits_error}"
     )]
     Fitsio {
-        fits_error: Box<fitsio::errors::Error>,
+        fits_error: Box<crate::fitsio::errors::Error>,
         fits_filename: Box<Path>,
         hdu_description: Box<str>,
         source_file: &'static str,
@@ -80,6 +80,6 @@ pub enum FitsError {
     ReadCellArray {
         col_name: &'static str,
         hdu_num: usize,
-        err: Box<fitsio::errors::Error>,
+        err: Box<crate::fitsio::errors::Error>,
     },
 }

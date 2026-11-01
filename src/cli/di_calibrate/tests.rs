@@ -17,6 +17,7 @@ use serial_test::serial;
 use tempfile::{tempdir, TempDir};
 
 use super::{DiCalArgs, DiCalCliArgs};
+use crate::io::read::{read_group_data, read_group_params};
 use crate::{
     cli::{
         common::{BeamArgs, InputVisArgs, SkyModelWithVetoArgs},
@@ -516,56 +517,25 @@ fn test_1090008640_calibrate_model_uvfits() {
     let mut group_params_c = group_params_m.clone();
     let mut vis_c = vis_m.clone();
 
-    let mut status = 0;
     for i_row in 0..gcount_m.parse::<i64>().unwrap() {
-        unsafe {
-            // ffggpe = fits_read_grppar_flt
-            fitsio_sys::ffggpe(
-                uvfits_m.as_raw(),           /* I - FITS file pointer                       */
-                1 + i_row,                   /* I - group to read (1 = 1st group)           */
-                1,                           /* I - first vector element to read (1 = 1st)  */
-                group_params_m.len() as i64, /* I - number of values to read                */
-                group_params_m.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut status,                 /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
+        {
+            read_group_params(
+                &mut uvfits_m,
+                i_row as usize,
+                group_params_m.as_slice_mut().unwrap(),
+            )
+            .unwrap();
             assert_abs_diff_ne!(group_params_m, group_params_c);
-            // ffggpe = fits_read_grppar_flt
-            fitsio_sys::ffggpe(
-                uvfits_c.as_raw(),           /* I - FITS file pointer                       */
-                1 + i_row,                   /* I - group to read (1 = 1st group)           */
-                1,                           /* I - first vector element to read (1 = 1st)  */
-                group_params_c.len() as i64, /* I - number of values to read                */
-                group_params_c.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut status,                 /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
+            read_group_params(
+                &mut uvfits_c,
+                i_row as usize,
+                group_params_c.as_slice_mut().unwrap(),
+            )
+            .unwrap();
             assert_abs_diff_eq!(group_params_m, group_params_c);
-
-            // ffgpve = fits_read_img_flt
-            fitsio_sys::ffgpve(
-                uvfits_m.as_raw(),  /* I - FITS file pointer                       */
-                1 + i_row,          /* I - group to read (1 = 1st group)           */
-                1,                  /* I - first vector element to read (1 = 1st)  */
-                vis_m.len() as i64, /* I - number of values to read                */
-                0.0,                /* I - value for undefined pixels              */
-                vis_m.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut 0,             /* O - set to 1 if any values are null; else 0 */
-                &mut status,        /* IO - error status                           */
-            );
+            read_group_data(&mut uvfits_m, i_row as usize, vis_m.as_slice_mut().unwrap()).unwrap();
             assert_abs_diff_ne!(vis_m, vis_c);
-            // ffgpve = fits_read_img_flt
-            fitsio_sys::ffgpve(
-                uvfits_c.as_raw(),  /* I - FITS file pointer                       */
-                1 + i_row,          /* I - group to read (1 = 1st group)           */
-                1,                  /* I - first vector element to read (1 = 1st)  */
-                vis_c.len() as i64, /* I - number of values to read                */
-                0.0,                /* I - value for undefined pixels              */
-                vis_c.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut 0,             /* O - set to 1 if any values are null; else 0 */
-                &mut status,        /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
+            read_group_data(&mut uvfits_c, i_row as usize, vis_c.as_slice_mut().unwrap()).unwrap();
             assert_abs_diff_eq!(vis_m, vis_c);
         };
     }

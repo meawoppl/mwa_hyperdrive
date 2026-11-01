@@ -447,7 +447,9 @@ impl Mwaf {
                     .fill(0xFF);
             }
 
+            #[cfg(not(feature = "fitsio-pure"))]
             let mut status = 0;
+            #[cfg(not(feature = "fitsio-pure"))]
             unsafe {
                 // ffgcvb = fits_read_col_byt
                 fitsio_sys::ffgcvb(
@@ -462,7 +464,17 @@ impl Mwaf {
                     &mut status,        /* IO - error status                           */
                 );
             }
-            fitsio::errors::check_status(status).map_err(|e| FitsError::Fitsio {
+            #[cfg(not(feature = "fitsio-pure"))]
+            let result = crate::fitsio::errors::check_status(status);
+            // A bit column read as bytes gives its packed bytes, as ffgcvb does.
+            #[cfg(feature = "fitsio-pure")]
+            let result = hdu
+                .read_col_range::<u8>(&fptr, "FLAGS", &(0..true_num_time_steps * num_baselines))
+                .map(|bytes| {
+                    let flags = flags.as_slice_mut().expect("is contiguous");
+                    flags[..bytes.len()].copy_from_slice(&bytes);
+                });
+            result.map_err(|e| FitsError::Fitsio {
                 fits_error: Box::new(e),
                 fits_filename: file.to_path_buf().into_boxed_path(),
                 hdu_description: "1".to_string().into_boxed_str(),

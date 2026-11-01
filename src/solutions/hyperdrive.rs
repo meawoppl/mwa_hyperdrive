@@ -8,13 +8,11 @@
 //! <https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html>
 
 use std::{
-    ffi::CString,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
-use fitsio::{
-    errors::check_status as fits_check_status,
+use crate::fitsio::{
     hdu::FitsHdu,
     images::{ImageDescription, ImageType},
     tables::{ColumnDataType, ColumnDescription, ReadsCol},
@@ -37,6 +35,7 @@ use crate::io::read::{
     pfb_gains::PfbFlavour,
     RawDataCorrections,
 };
+use crate::io::write::fits::{write_cmdline, write_comment, write_long_string, write_longwarn};
 
 pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadError> {
     let mut fptr = fits_open(file)?;
@@ -161,9 +160,10 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
         match fptr.hdu("TIMEBLOCKS") {
             Err(e) => match e {
                 // Status code 301 means "unavailable".
-                fitsio::errors::Error::Fits(fitsio::errors::FitsError { status: 301, .. }) => {
-                    (None, None, None)
-                }
+                crate::fitsio::errors::Error::Fits(crate::fitsio::errors::FitsError {
+                    status: 301,
+                    ..
+                }) => (None, None, None),
                 _ => return Err(SolutionsReadError::Fitsio(e)),
             },
             Ok(hdu) => {
@@ -185,7 +185,7 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
                         }
                     }
                     Err(e) => match &e {
-                        fitsio::errors::Error::Message(m) => match m.as_str() {
+                        crate::fitsio::errors::Error::Message(m) => match m.as_str() {
                             "Cannot find column \"Start\"" => None,
                             _ => return Err(SolutionsReadError::Fitsio(e)),
                         },
@@ -210,7 +210,7 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
                         }
                     }
                     Err(e) => match &e {
-                        fitsio::errors::Error::Message(m) => match m.as_str() {
+                        crate::fitsio::errors::Error::Message(m) => match m.as_str() {
                             "Cannot find column \"End\"" => None,
                             _ => return Err(SolutionsReadError::Fitsio(e)),
                         },
@@ -235,7 +235,7 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
                         }
                     }
                     Err(e) => match &e {
-                        fitsio::errors::Error::Message(m) => match m.as_str() {
+                        crate::fitsio::errors::Error::Message(m) => match m.as_str() {
                             "Cannot find column \"Average\"" => None,
                             _ => return Err(SolutionsReadError::Fitsio(e)),
                         },
@@ -279,7 +279,7 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
                     }
                 }
                 Err(e) => match &e {
-                    fitsio::errors::Error::Message(m) => match m.as_str() {
+                    crate::fitsio::errors::Error::Message(m) => match m.as_str() {
                         "Cannot find column \"Freq\"" => None,
                         _ => return Err(SolutionsReadError::Fitsio(e)),
                     },
@@ -288,7 +288,10 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
             },
             Err(e) => match e {
                 // Status code 301 means "unavailable".
-                fitsio::errors::Error::Fits(fitsio::errors::FitsError { status: 301, .. }) => None,
+                crate::fitsio::errors::Error::Fits(crate::fitsio::errors::FitsError {
+                    status: 301,
+                    ..
+                }) => None,
                 _ => return Err(SolutionsReadError::Fitsio(e)),
             },
         }
@@ -299,9 +302,10 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
         match fptr.hdu("TILES") {
             Err(e) => match e {
                 // Status code 301 means "unavailable".
-                fitsio::errors::Error::Fits(fitsio::errors::FitsError { status: 301, .. }) => {
-                    (None, None, None)
-                }
+                crate::fitsio::errors::Error::Fits(crate::fitsio::errors::FitsError {
+                    status: 301,
+                    ..
+                }) => (None, None, None),
                 _ => return Err(SolutionsReadError::Fitsio(e)),
             },
             Ok(hdu) => {
@@ -319,7 +323,7 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
                         Vec1::try_from_vec(v).ok()
                     }
                     Err(e) => match &e {
-                        fitsio::errors::Error::Message(m) => match m.as_str() {
+                        crate::fitsio::errors::Error::Message(m) => match m.as_str() {
                             "Cannot find column \"TileName\"" => None,
                             _ => return Err(SolutionsReadError::Fitsio(e)),
                         },
@@ -372,7 +376,10 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
             }
             Err(e) => match e {
                 // Status code 301 means "unavailable".
-                fitsio::errors::Error::Fits(fitsio::errors::FitsError { status: 301, .. }) => None,
+                crate::fitsio::errors::Error::Fits(crate::fitsio::errors::FitsError {
+                    status: 301,
+                    ..
+                }) => None,
                 _ => return Err(SolutionsReadError::Fitsio(e)),
             },
         }
@@ -396,7 +403,10 @@ pub(crate) fn read(file: &Path) -> Result<CalibrationSolutions, SolutionsReadErr
             }
             Err(e) => match e {
                 // Status code 301 means "unavailable".
-                fitsio::errors::Error::Fits(fitsio::errors::FitsError { status: 301, .. }) => None,
+                crate::fitsio::errors::Error::Fits(crate::fitsio::errors::FitsError {
+                    status: 301,
+                    ..
+                }) => None,
                 _ => return Err(SolutionsReadError::Fitsio(e)),
             },
         }
@@ -446,7 +456,7 @@ fn read_tile_cells<T: ReadsCol + Clone + num_traits::Zero, const N: usize>(
             Ok(values) => cell.assign(&ArrayView1::from(&values)),
             // Status code 301 means "unavailable". 302 is "column number < 1
             // or > tfields"; in other words, the column doesn't exist.
-            Err(fitsio::errors::Error::Fits(fitsio::errors::FitsError {
+            Err(crate::fitsio::errors::Error::Fits(crate::fitsio::errors::FitsError {
                 status: 301 | 302,
                 ..
             })) => return Ok(None),
@@ -462,7 +472,6 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
     }
     let mut fptr = FitsFile::create(file).open()?;
     let hdu = fits_open_hdu(&mut fptr, 0)?;
-    let mut status = 0;
 
     let CalibrationSolutions {
         di_jones,
@@ -491,27 +500,19 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
     } = sols;
 
     // Signal that we're using long strings.
-    unsafe {
-        // ffplsw = fits_write_key_longwarn
-        fitsio_sys::ffplsw(
-            fptr.as_raw(), /* I - FITS file pointer  */
-            &mut status,   /* IO - error status       */
-        );
-        fits_check_status(status)?;
-    }
+    write_longwarn(&mut fptr, &hdu)?;
 
     // Write the documentation URL as a comment.
-    unsafe {
-        let comm = CString::new("The contents of this file are documented at:").unwrap();
-        // ffpcom = fits_write_comment
-        fitsio_sys::ffpcom(fptr.as_raw(), comm.as_ptr(), &mut status);
-        fits_check_status(status)?;
-        let comm =
-            CString::new("https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html")
-                .unwrap();
-        fitsio_sys::ffpcom(fptr.as_raw(), comm.as_ptr(), &mut status);
-        fits_check_status(status)?;
-    }
+    write_comment(
+        &mut fptr,
+        &hdu,
+        "The contents of this file are documented at:",
+    )?;
+    write_comment(
+        &mut fptr,
+        &hdu,
+        "https://mwatelescope.github.io/mwa_hyperdrive/defs/cal_sols_hyp.html",
+    )?;
 
     // Write the obsid if we can.
     if let Some(obsid) = obsid {
@@ -599,42 +600,16 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
         hdu.write_key(&mut fptr, "BEAMTYPE", beam_type.to_string())?;
     }
     if let Some(beam_file) = beam_file {
-        match CString::new(beam_file.display().to_string()) {
-            // This represents failure to convert an argument to UTF-8.
-            Err(_) => (),
-            Ok(value) => unsafe {
-                let key_name = CString::new("BEAMFILE").unwrap();
-                let mut status = 0;
-                // ffpkls = fits_write_key_longstr
-                fitsio_sys::ffpkls(
-                    fptr.as_raw(),     /* I - FITS file pointer        */
-                    key_name.as_ptr(), /* I - name of keyword to write */
-                    value.as_ptr(),    /* I - keyword value            */
-                    std::ptr::null(),  /* I - keyword comment          */
-                    &mut status,       /* IO - error status            */
-                );
-                fits_check_status(status)?;
-            },
+        // A path holding a NUL can't be written.
+        let beam_file = beam_file.display().to_string();
+        if !beam_file.contains('\0') {
+            write_long_string(&mut fptr, &hdu, "BEAMFILE", &beam_file, None)?;
         }
     }
 
     if let Some(modeller) = modeller {
-        // Write this out as a long string. We assume that there is no invalid
-        // UTF-8.
-        let key_name = CString::new("MODELLER").unwrap();
-        let value = CString::new(modeller.as_str()).unwrap();
-        let mut status = 0;
-        unsafe {
-            // ffpkls = fits_write_key_longstr
-            fitsio_sys::ffpkls(
-                fptr.as_raw(),        /* I - FITS file pointer        */
-                key_name.as_ptr(),    /* I - name of keyword to write */
-                value.as_ptr(),       /* I - keyword value            */
-                std::ptr::null_mut(), /* I - keyword comment          */
-                &mut status,          /* IO - error status            */
-            );
-            fits_check_status(status)?;
-        }
+        // Write this out as a long string.
+        write_long_string(&mut fptr, &hdu, "MODELLER", modeller, None)?;
     }
 
     hdu.write_key(
@@ -647,34 +622,7 @@ pub(crate) fn write(sols: &CalibrationSolutions, file: &Path) -> Result<(), Solu
         ),
     )?;
 
-    // Write out the current command-line call ("CMDLINE").
-    unsafe {
-        // It's possible that the command-line call has invalid UTF-8. So use
-        // args_os and attempt to convert to UTF-8 strings. If there are
-        // problems on the way, don't bother trying to write the CMDLINE key.
-        match std::env::args_os()
-            .map(|a| a.into_string())
-            .collect::<Result<Vec<String>, _>>()
-            .and_then(|v| CString::new(v.join(" ")).map_err(|_| std::ffi::OsString::from("")))
-        {
-            // This represents failure to convert an argument to UTF-8.
-            Err(_) => (),
-            Ok(value) => {
-                let key_name = CString::new("CMDLINE").unwrap();
-                let comment = CString::new("Command-line call").unwrap();
-                let mut status = 0;
-                // ffpkls = fits_write_key_longstr
-                fitsio_sys::ffpkls(
-                    fptr.as_raw(),     /* I - FITS file pointer        */
-                    key_name.as_ptr(), /* I - name of keyword to write */
-                    value.as_ptr(),    /* I - keyword value            */
-                    comment.as_ptr(),  /* I - keyword comment          */
-                    &mut status,       /* IO - error status            */
-                );
-                fits_check_status(status)?;
-            }
-        }
-    }
+    write_cmdline(&mut fptr, &hdu)?;
 
     // Four elements for each Jones matrix, and we need to double the last axis,
     // because we can't write complex numbers directly to FITS files; instead,

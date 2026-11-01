@@ -82,17 +82,17 @@ pub enum UvfitsReadError {
     },
 
     #[error("When attempting to read uvfits baseline metadata, cfitsio gave an error: {0}")]
-    Metadata(fitsio::errors::Error),
+    Metadata(crate::fitsio::errors::Error),
 
     #[error("When attempting to read uvfits row {row_num}, cfitsio gave an error: {err}")]
     ReadVis {
         row_num: usize,
-        err: fitsio::errors::Error,
+        err: crate::fitsio::errors::Error,
     },
 
     /// A generic error associated with fitsio.
     #[error(transparent)]
-    Fitsio(#[from] fitsio::errors::Error),
+    Fitsio(#[from] crate::fitsio::errors::Error),
 
     /// A error from interacting with a fits file. This particular error wraps
     /// those of `rust-fitsio`.

@@ -20,7 +20,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use fitsio::{errors::check_status as fits_check_status, hdu::FitsHdu, FitsFile};
+#[cfg(not(feature = "fitsio-pure"))]
+use crate::fitsio::errors::check_status as fits_check_status;
+use crate::fitsio::{hdu::FitsHdu, FitsFile};
 use hifitime::{Duration, Epoch, TimeUnits};
 use log::{debug, trace, warn};
 use marlu::{
@@ -571,25 +573,12 @@ impl UvfitsReader {
             // Ensure we're on the data-containing HDU.
             let _ = uvfits_fptr.primary_hdu()?;
             for i_row in 0..metadata.num_rows {
-                unsafe {
-                    let mut status = 0;
-                    // ffggpe = fits_read_grppar_flt
-                    fitsio_sys::ffggpe(
-                        uvfits_fptr.as_raw(), /* I - FITS file pointer                       */
-                        (i_row + 1).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
-                        1, /* I - first vector element to read (1 = 1st)  */
-                        group_params
-                            .len()
-                            .try_into()
-                            .expect("not larger than i64::MAX"), /* I - number of values to read                */
-                        group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                        &mut status,               /* IO - error status                           */
-                    );
-                    fits_check_status(status).map_err(|err| UvfitsReadError::ReadVis {
+                read_group_params(&mut uvfits_fptr, i_row, &mut group_params).map_err(|err| {
+                    UvfitsReadError::ReadVis {
                         row_num: i_row + 1,
                         err,
-                    })?;
-                }
+                    }
+                })?;
                 let (uvfits_ant1, uvfits_ant2) = match metadata.indices.baseline_or_antennas {
                     BaselineOrAntennas::Baseline { index } => {
                         let uvfits_bl = group_params[usize::from(index - 1)];
@@ -700,25 +689,12 @@ impl UvfitsReader {
             .collect::<Vec<_>>();
         for row in row_range_start..row_range_end {
             // Read in the row's group parameters.
-            let mut status = 0;
-            unsafe {
-                // ffggpe = fits_read_grppar_flt
-                fitsio_sys::ffggpe(
-                    uvfits.as_raw(), /* I - FITS file pointer                       */
-                    (1 + row).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
-                    1, /* I - first vector element to read (1 = 1st)  */
-                    group_params
-                        .len()
-                        .try_into()
-                        .expect("not larger than i64::MAX"), /* I - number of values to read                */
-                    group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                    &mut status,               /* IO - error status                           */
-                );
-                fits_check_status(status).map_err(|err| UvfitsReadError::ReadVis {
+            read_group_params(&mut uvfits, row, &mut group_params).map_err(|err| {
+                UvfitsReadError::ReadVis {
                     row_num: row + 1,
                     err,
-                })?;
-            };
+                }
+            })?;
 
             // Check that the time associated with these group parameters is
             // correct.
@@ -769,25 +745,11 @@ impl UvfitsReader {
                     .get(&(ant1, ant2))
                     .copied()
                 {
-                    unsafe {
-                        // ffgpve = fits_read_img_flt
-                        fitsio_sys::ffgpve(
-                            uvfits.as_raw(), /* I - FITS file pointer                       */
-                            (1 + row).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
-                            1, /* I - first vector element to read (1 = 1st)  */
-                            uvfits_vis
-                                .len()
-                                .try_into()
-                                .expect("not larger than i64::MAX"), /* I - number of values to read                */
-                            0.0, /* I - value for undefined pixels              */
-                            uvfits_vis.as_mut_ptr(), /* O - array of values that are returned       */
-                            &mut 0,      /* O - set to 1 if any values are null; else 0 */
-                            &mut status, /* IO - error status                           */
-                        );
-                    }
-                    fits_check_status(status).map_err(|err| UvfitsReadError::ReadVis {
-                        row_num: row + 1,
-                        err,
+                    read_group_data(&mut uvfits, row, &mut uvfits_vis).map_err(|err| {
+                        UvfitsReadError::ReadVis {
+                            row_num: row + 1,
+                            err,
+                        }
                     })?;
 
                     // Put the data and weights into the shared arrays outside this
@@ -874,25 +836,11 @@ impl UvfitsReader {
                         .get(&ant1)
                         .copied()
                     {
-                        unsafe {
-                            // ffgpve = fits_read_img_flt
-                            fitsio_sys::ffgpve(
-                                uvfits.as_raw(), /* I - FITS file pointer                       */
-                                (1 + row).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
-                                1, /* I - first vector element to read (1 = 1st)  */
-                                uvfits_vis
-                                    .len()
-                                    .try_into()
-                                    .expect("not larger than i64::MAX"), /* I - number of values to read                */
-                                0.0, /* I - value for undefined pixels              */
-                                uvfits_vis.as_mut_ptr(), /* O - array of values that are returned       */
-                                &mut 0,      /* O - set to 1 if any values are null; else 0 */
-                                &mut status, /* IO - error status                           */
-                            );
-                        }
-                        fits_check_status(status).map_err(|err| UvfitsReadError::ReadVis {
-                            row_num: row + 1,
-                            err,
+                        read_group_data(&mut uvfits, row, &mut uvfits_vis).map_err(|err| {
+                            UvfitsReadError::ReadVis {
+                                row_num: row + 1,
+                                err,
+                            }
                         })?;
 
                         let mut out_vis = autos.vis_fb.slice_mut(s![.., i_ant]);
@@ -1345,22 +1293,13 @@ impl UvfitsMetadata {
             'outer: while i_row < num_rows {
                 let num_rows_to_iterate =
                     group_params.len_of(Axis(0)).min(num_rows.abs_diff(i_row));
-                unsafe {
-                    let mut status = 0;
-                    // ffggpe = fits_read_grppar_flt
-                    fitsio_sys::ffggpe(
-                        uvfits.as_raw(), /* I - FITS file pointer                       */
-                        (i_row + 1).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
-                        1, /* I - first vector element to read (1 = 1st)  */
-                        (num_rows_to_iterate * pcount)
-                            .try_into()
-                            .expect("not larger than i64::MAX"), /* I - number of values to read                */
-                        group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                        &mut status,               /* IO - error status                           */
-                    );
-                    // Check the status.
-                    fits_check_status(status).map_err(UvfitsReadError::Metadata)?;
-                }
+                let group_params_slice = group_params.as_slice_mut().expect("is contiguous");
+                read_group_params(
+                    uvfits,
+                    i_row,
+                    &mut group_params_slice[..num_rows_to_iterate * pcount],
+                )
+                .map_err(UvfitsReadError::Metadata)?;
 
                 for params in group_params.outer_iter().take(num_rows_to_iterate) {
                     // Track information on the timestamps.
@@ -1433,20 +1372,9 @@ impl UvfitsMetadata {
             "There are a variable number of baselines per timestep, which is not supported"
         );
         while i_row < num_rows {
-            unsafe {
-                let mut status = 0;
-                // ffggpe = fits_read_grppar_flt
-                fitsio_sys::ffggpe(
-                    uvfits.as_raw(), /* I - FITS file pointer                       */
-                    (i_row + 1).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
-                    1, /* I - first vector element to read (1 = 1st)  */
-                    pcount.try_into().expect("not larger than i64::MAX"), /* I - number of values to read                */
-                    group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                    &mut status,               /* IO - error status                           */
-                );
-                // Check the status.
-                fits_check_status(status).map_err(UvfitsReadError::Metadata)?;
-            }
+            let group_params_slice = group_params.as_slice_mut().expect("is contiguous");
+            read_group_params(uvfits, i_row, &mut group_params_slice[..pcount])
+                .map_err(UvfitsReadError::Metadata)?;
 
             // Take the metadata out of read-in group parameters.
             let jd_frac = {
@@ -1759,4 +1687,61 @@ impl Indices {
             inttim: inttim_index,
         })
     }
+}
+
+/// Fill `out` with random-group parameters from the 0-indexed group `group`
+/// on, unscaled, as cfitsio's `ffggpe` reads them: a read longer than a
+/// group's parameters runs on into the following groups' parameters.
+pub(crate) fn read_group_params(
+    fptr: &mut FitsFile,
+    group: usize,
+    out: &mut [f32],
+) -> Result<(), crate::fitsio::errors::Error> {
+    #[cfg(not(feature = "fitsio-pure"))]
+    {
+        let mut status = 0;
+        unsafe {
+            // ffggpe = fits_read_grppar_flt
+            fitsio_sys::ffggpe(
+                fptr.as_raw(), /* I - FITS file pointer                       */
+                (group + 1).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
+                1, /* I - first vector element to read (1 = 1st)  */
+                out.len().try_into().expect("not larger than i64::MAX"), /* I - number of values to read                */
+                out.as_mut_ptr(), /* O - array of values that are returned       */
+                &mut status,      /* IO - error status                           */
+            );
+        }
+        fits_check_status(status)
+    }
+    #[cfg(feature = "fitsio-pure")]
+    fptr.primary_hdu()?.read_group_params(fptr, group, 0, out)
+}
+
+/// Fill `out` with the data array of the 0-indexed random group `group`, as
+/// cfitsio's `ffgpve` reads it.
+pub(crate) fn read_group_data(
+    fptr: &mut FitsFile,
+    group: usize,
+    out: &mut [f32],
+) -> Result<(), crate::fitsio::errors::Error> {
+    #[cfg(not(feature = "fitsio-pure"))]
+    {
+        let mut status = 0;
+        unsafe {
+            // ffgpve = fits_read_img_flt
+            fitsio_sys::ffgpve(
+                fptr.as_raw(), /* I - FITS file pointer                       */
+                (group + 1).try_into().expect("not larger than i64::MAX"), /* I - group to read (1 = 1st group)           */
+                1, /* I - first vector element to read (1 = 1st)  */
+                out.len().try_into().expect("not larger than i64::MAX"), /* I - number of values to read                */
+                0.0,              /* I - value for undefined pixels              */
+                out.as_mut_ptr(), /* O - array of values that are returned       */
+                &mut 0,           /* O - set to 1 if any values are null; else 0 */
+                &mut status,      /* IO - error status                           */
+            );
+        }
+        fits_check_status(status)
+    }
+    #[cfg(feature = "fitsio-pure")]
+    fptr.primary_hdu()?.read_group_data(fptr, group, 0, out)
 }

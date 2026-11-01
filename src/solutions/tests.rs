@@ -175,10 +175,19 @@ fn test_read_hyperdrive_solutions_unknown_beam_type() {
     let sols = make_solutions();
     let tmp_file = tempfile::NamedTempFile::new().expect("Couldn't make tmp file");
     hyperdrive::write(&sols, tmp_file.path()).unwrap();
+    #[cfg(feature = "fitsio-pure")]
+    {
+        // fitsio-pure's `write_key` updates a key in place, as ffukys does.
+        let mut fptr = crate::fitsio::FitsFile::edit(tmp_file.path()).unwrap();
+        let hdu = fptr.primary_hdu().unwrap();
+        hdu.write_key(&mut fptr, "BEAMTYPE", "a-beam-from-the-future")
+            .unwrap();
+    }
+    #[cfg(not(feature = "fitsio-pure"))]
     {
         // fitsio's `write_key` appends rather than updates, so go through
         // cfitsio to replace the key in place.
-        let mut fptr = fitsio::FitsFile::edit(tmp_file.path()).unwrap();
+        let mut fptr = crate::fitsio::FitsFile::edit(tmp_file.path()).unwrap();
         let key = std::ffi::CString::new("BEAMTYPE").unwrap();
         let value = std::ffi::CString::new("a-beam-from-the-future").unwrap();
         let mut status = 0;

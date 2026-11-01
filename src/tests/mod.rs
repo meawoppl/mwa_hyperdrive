@@ -131,7 +131,7 @@ pub(crate) fn get_reduced_1090008640_uvfits_pbs() -> DataAsPathBufs {
 /// `metafits`. Each `(row, name)` names rows `row` and `row + 1` (0-indexed),
 /// a tile's two RF inputs.
 pub(crate) fn set_metafits_tile_names(metafits: &Path, names: &[(usize, &str)]) {
-    let mut fptr = fitsio::FitsFile::edit(metafits).unwrap();
+    let mut fptr = crate::fitsio::FitsFile::edit(metafits).unwrap();
     let hdu = fptr.hdu(1).unwrap();
     // fitsio's write_col_range for strings indexes its data by row, so write
     // the whole column.

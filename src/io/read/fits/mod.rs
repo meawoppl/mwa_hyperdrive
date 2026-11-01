@@ -8,13 +8,14 @@ mod error;
 
 pub(crate) use error::FitsError;
 
+use std::fmt::Display;
+#[cfg(not(feature = "fitsio-pure"))]
 use std::{
     ffi::{CStr, CString},
-    fmt::Display,
     ptr,
 };
 
-use fitsio::{
+use crate::fitsio::{
     hdu::*,
     tables::{ConcreteColumnDescription, ReadsCol},
     FitsFile,
@@ -66,7 +67,7 @@ pub(crate) fn fits_get_optional_key<T: std::str::FromStr>(
     let unparsed_value: String = match hdu.read_key(fits_fptr, keyword) {
         Ok(key_value) => key_value,
         Err(e) => match &e {
-            fitsio::errors::Error::Fits(fe) => match fe.status {
+            crate::fitsio::errors::Error::Fits(fe) => match fe.status {
                 202 | 204 => return Ok(None),
                 _ => {
                     let caller = std::panic::Location::caller();
@@ -137,7 +138,7 @@ pub(crate) fn fits_get_required_key<T: std::str::FromStr>(
 
 /// Get a column from a fits file's HDU.
 #[track_caller]
-pub(crate) fn fits_get_col<T: fitsio::tables::ReadsCol>(
+pub(crate) fn fits_get_col<T: crate::fitsio::tables::ReadsCol>(
     fits_fptr: &mut FitsFile,
     hdu: &FitsHdu,
     keyword: &str,
@@ -160,13 +161,15 @@ pub(crate) fn fits_get_col<T: fitsio::tables::ReadsCol>(
 /// FITSs CONTINUE mechanism by calling a low level fits function.
 #[track_caller]
 pub(crate) fn fits_get_optional_key_long_string(
-    fits_fptr: &mut fitsio::FitsFile,
+    fits_fptr: &mut crate::fitsio::FitsFile,
     hdu: &FitsHdu,
     keyword: &str,
 ) -> Result<Option<String>, FitsError> {
     // Read the long string.
+    #[cfg(not(feature = "fitsio-pure"))]
     let keyword_ffi = CString::new(keyword)
         .expect("fits_get_optional_fits_long_string: CString::new() failed for keyword");
+    #[cfg(not(feature = "fitsio-pure"))]
     let long_string = unsafe {
         let mut status = 0;
         let mut long_string_ptr = ptr::null_mut();
@@ -204,6 +207,23 @@ pub(crate) fn fits_get_optional_key_long_string(
                     source_column: caller.column(),
                 });
             }
+        }
+    };
+    // read_key_longstr follows CONTINUE cards, as ffgkls does.
+    #[cfg(feature = "fitsio-pure")]
+    let long_string = match hdu.read_key_longstr::<String>(fits_fptr, keyword) {
+        Ok(long_string) => Some(long_string),
+        Err(crate::fitsio::errors::Error::Fits(e)) if e.status == 202 || e.status == 204 => None,
+        Err(_) => {
+            let caller = std::panic::Location::caller();
+            return Err(FitsError::LongString {
+                key: keyword.to_string().into_boxed_str(),
+                fits_filename: fits_fptr.file_path().into(),
+                hdu_num: hdu.number + 1,
+                source_file: caller.file(),
+                source_line: caller.line(),
+                source_column: caller.column(),
+            });
         }
     };
 
@@ -259,7 +279,7 @@ pub(crate) fn _fits_get_image_size<'a>(
 
 /// Given a FITS file pointer and a HDU, read the associated image.
 #[track_caller]
-pub(crate) fn fits_get_image<T: fitsio::images::ReadImage>(
+pub(crate) fn fits_get_image<T: crate::fitsio::images::ReadImage>(
     fits_fptr: &mut FitsFile,
     hdu: &FitsHdu,
 ) -> Result<T, FitsError> {
@@ -295,6 +315,25 @@ pub(crate) fn _fits_get_float_image_into_buffer(
     hdu: &FitsHdu,
     buffer: &mut [f32],
 ) -> Result<(), FitsError> {
+    #[cfg(feature = "fitsio-pure")]
+    {
+        use crate::fitsio::images::ReadImageIntoBuffer;
+
+        // Like ffgpv: the first `buffer.len()` pixels, BSCALE/BZERO applied.
+        if let Err(e) = f32::read_image_into_buffer(fits_fptr, hdu, buffer) {
+            let caller = std::panic::Location::caller();
+            return Err(FitsError::Fitsio {
+                fits_error: Box::new(e),
+                fits_filename: fits_fptr.file_path().into(),
+                hdu_description: format!("{}", hdu.number + 1).into_boxed_str(),
+                source_file: caller.file(),
+                source_line: caller.line(),
+                source_column: caller.column(),
+            });
+        }
+    }
+
+    #[cfg(not(feature = "fitsio-pure"))]
     unsafe {
         // Get raw ptr and length to user supplied buffer
         let buffer_len = buffer.len() as i64;
@@ -315,7 +354,7 @@ pub(crate) fn _fits_get_float_image_into_buffer(
         );
 
         // Check fits call status
-        match fitsio::errors::check_status(status) {
+        match crate::fitsio::errors::check_status(status) {
             Ok(_) => {}
             Err(e) => {
                 let caller = std::panic::Location::caller();
@@ -361,8 +400,8 @@ pub(crate) fn fits_read_cell_f64_array<const NUM_ELEM: usize>(
 }
 
 /// The error cfitsio gives for a column that doesn't exist (`COL_NOT_FOUND`).
-pub(crate) fn col_not_found() -> fitsio::errors::Error {
-    fitsio::errors::check_status(219).expect_err("219 is an error status")
+pub(crate) fn col_not_found() -> crate::fitsio::errors::Error {
+    crate::fitsio::errors::check_status(219).expect_err("219 is an error status")
 }
 
 /// Find the table column `col_name` as cfitsio's `ffgcno` does, matching case
@@ -372,14 +411,14 @@ pub(crate) fn fits_find_col<'a>(
     hdu: &'a FitsHdu,
     col_name: &str,
     case_sensitive: bool,
-) -> Result<Option<&'a ConcreteColumnDescription>, fitsio::errors::Error> {
+) -> Result<Option<&'a ConcreteColumnDescription>, crate::fitsio::errors::Error> {
     let HduInfo::TableInfo {
         column_descriptions,
         ..
     } = &hdu.info
     else {
         // NOT_TABLE
-        return Err(fitsio::errors::check_status(235).expect_err("235 is an error status"));
+        return Err(crate::fitsio::errors::check_status(235).expect_err("235 is an error status"));
     };
     let mut matches = column_descriptions.iter().filter(|desc| {
         if case_sensitive {
@@ -392,7 +431,7 @@ pub(crate) fn fits_find_col<'a>(
         (Some(desc), None) => Ok(Some(desc)),
         (None, _) => Ok(None),
         (Some(_), Some(_)) => {
-            Err(fitsio::errors::check_status(237).expect_err("237 is an error status"))
+            Err(crate::fitsio::errors::check_status(237).expect_err("237 is an error status"))
         }
     }
 }
@@ -406,7 +445,7 @@ pub(crate) fn fits_read_cell_array<T: ReadsCol>(
     col_desc: &ConcreteColumnDescription,
     row: usize,
     n_elem: usize,
-) -> Result<Vec<T>, fitsio::errors::Error> {
+) -> Result<Vec<T>, crate::fitsio::errors::Error> {
     let num_rows = n_elem.div_ceil(col_desc.data_type.repeat.max(1)).max(1);
     let mut values = hdu.read_col_range(fits_ptr, &col_desc.name, &(row..row + num_rows))?;
     values.truncate(n_elem);

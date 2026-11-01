@@ -32,6 +32,13 @@ mod gpu;
 #[cfg(test)]
 mod tests;
 
+// The fitsio API hyperdrive's FITS code is written against: the `fitsio` crate
+// (cfitsio), or fitsio-pure's fitsio-compatible API with "fitsio-pure".
+#[cfg(not(feature = "fitsio-pure"))]
+pub(crate) use ::fitsio;
+#[cfg(feature = "fitsio-pure")]
+pub(crate) use fitsio_pure::compat as fitsio;
+
 use crossbeam_utils::atomic::AtomicCell;
 lazy_static::lazy_static! {
     /// Are progress bars being drawn? This should only ever be enabled by CLI

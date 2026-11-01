@@ -49,7 +49,7 @@ pub(crate) enum SolutionsReadError {
     Fits(#[from] crate::io::read::fits::FitsError),
 
     #[error(transparent)]
-    Fitsio(#[from] fitsio::errors::Error),
+    Fitsio(#[from] crate::fitsio::errors::Error),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),
@@ -61,7 +61,7 @@ pub(crate) enum SolutionsWriteError {
     UnsupportedExt { ext: String },
 
     #[error(transparent)]
-    Fitsio(#[from] fitsio::errors::Error),
+    Fitsio(#[from] crate::fitsio::errors::Error),
 
     #[error(transparent)]
     Fits(#[from] crate::io::read::fits::FitsError),

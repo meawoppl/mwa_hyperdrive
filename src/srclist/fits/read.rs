@@ -4,7 +4,7 @@
 
 use std::{collections::HashMap, path::Path};
 
-use fitsio::{hdu::FitsHdu, FitsFile};
+use crate::fitsio::{hdu::FitsHdu, FitsFile};
 use indexmap::IndexMap;
 use itertools::izip;
 use log::debug;
@@ -50,15 +50,15 @@ pub(crate) fn parse_source_list(file: &Path) -> Result<SourceList, FitsError> {
 
     // Get the fits column names.
     let col_names: Vec<String> = match &hdu.info {
-        fitsio::hdu::HduInfo::TableInfo {
+        crate::fitsio::hdu::HduInfo::TableInfo {
             column_descriptions,
             num_rows: _,
         } => column_descriptions
             .iter()
             .map(|cd| cd.name.clone())
             .collect(),
-        fitsio::hdu::HduInfo::ImageInfo { .. } => todo!(),
-        fitsio::hdu::HduInfo::AnyInfo => todo!(),
+        crate::fitsio::hdu::HduInfo::ImageInfo { .. } => todo!(),
+        crate::fitsio::hdu::HduInfo::AnyInfo => todo!(),
     };
 
     // Try to determine the format of the FITS file.

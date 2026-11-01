@@ -14,6 +14,7 @@ use tempfile::TempDir;
 use vec1::vec1;
 
 use super::*;
+use crate::io::read::{read_group_data, read_group_params};
 use crate::{
     cli::vis_simulate::VisSimulateArgs,
     io::read::fits::{fits_open, fits_open_hdu},
@@ -121,58 +122,17 @@ fn test_1090008640_vis_subtract() {
         fits_open_hdu(&mut uvfits_1, 0).unwrap();
         let mut group_params = [0.0; 5];
         let mut vis_1: Vec<f32> = vec![0.0; num_chans * 4 * 3];
-        let mut status = 0;
-        unsafe {
-            // ffggpe = fits_read_grppar_flt
-            fitsio_sys::ffggpe(
-                uvfits_1.as_raw(),         /* I - FITS file pointer                       */
-                1,                         /* I - group to read (1 = 1st group)           */
-                1,                         /* I - first vector element to read (1 = 1st)  */
-                group_params.len() as i64, /* I - number of values to read                */
-                group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut status,               /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
-            // ffgpve = fits_read_img_flt
-            fitsio_sys::ffgpve(
-                uvfits_1.as_raw(),  /* I - FITS file pointer                       */
-                1,                  /* I - group to read (1 = 1st group)           */
-                1,                  /* I - first vector element to read (1 = 1st)  */
-                vis_1.len() as i64, /* I - number of values to read                */
-                0.0,                /* I - value for undefined pixels              */
-                vis_1.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut 0,             /* O - set to 1 if any values are null; else 0 */
-                &mut status,        /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
+        {
+            read_group_params(&mut uvfits_1, 0, &mut group_params).unwrap();
+            read_group_data(&mut uvfits_1, 0, &mut vis_1).unwrap();
         };
 
         let mut uvfits_2 = fits_open(&subtracted).unwrap();
         fits_open_hdu(&mut uvfits_2, 0).unwrap();
         let mut vis_2: Vec<f32> = vec![0.0; num_chans * 4 * 3];
-        unsafe {
-            // ffggpe = fits_read_grppar_flt
-            fitsio_sys::ffggpe(
-                uvfits_2.as_raw(),         /* I - FITS file pointer                       */
-                1,                         /* I - group to read (1 = 1st group)           */
-                1,                         /* I - first vector element to read (1 = 1st)  */
-                group_params.len() as i64, /* I - number of values to read                */
-                group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut status,               /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
-            // ffgpve = fits_read_img_flt
-            fitsio_sys::ffgpve(
-                uvfits_2.as_raw(),  /* I - FITS file pointer                       */
-                1,                  /* I - group to read (1 = 1st group)           */
-                1,                  /* I - first vector element to read (1 = 1st)  */
-                vis_2.len() as i64, /* I - number of values to read                */
-                0.0,                /* I - value for undefined pixels              */
-                vis_2.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut 0,             /* O - set to 1 if any values are null; else 0 */
-                &mut status,        /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
+        {
+            read_group_params(&mut uvfits_2, 0, &mut group_params).unwrap();
+            read_group_data(&mut uvfits_2, 0, &mut vis_2).unwrap();
         };
 
         assert_abs_diff_eq!(&vis_1[..], &vis_2[..]);
@@ -195,30 +155,9 @@ fn test_1090008640_vis_subtract() {
         fits_open_hdu(&mut uvfits, 0).unwrap();
         let mut group_params = [0.0; 5];
         let mut vis: Vec<f32> = vec![0.0; num_chans * 4 * 3];
-        let mut status = 0;
-        unsafe {
-            // ffggpe = fits_read_grppar_flt
-            fitsio_sys::ffggpe(
-                uvfits.as_raw(),           /* I - FITS file pointer                       */
-                1,                         /* I - group to read (1 = 1st group)           */
-                1,                         /* I - first vector element to read (1 = 1st)  */
-                group_params.len() as i64, /* I - number of values to read                */
-                group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut status,               /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
-            // ffgpve = fits_read_img_flt
-            fitsio_sys::ffgpve(
-                uvfits.as_raw(),  /* I - FITS file pointer                       */
-                1,                /* I - group to read (1 = 1st group)           */
-                1,                /* I - first vector element to read (1 = 1st)  */
-                vis.len() as i64, /* I - number of values to read                */
-                0.0,              /* I - value for undefined pixels              */
-                vis.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut 0,           /* O - set to 1 if any values are null; else 0 */
-                &mut status,      /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
+        {
+            read_group_params(&mut uvfits, 0, &mut group_params).unwrap();
+            read_group_data(&mut uvfits, 0, &mut vis).unwrap();
         };
 
         let mut expected = vec![0.0; num_chans * 4 * 3];

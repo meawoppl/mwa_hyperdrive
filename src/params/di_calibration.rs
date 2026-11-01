@@ -645,7 +645,7 @@ pub(crate) enum DiCalibrateError {
     VisWrite(#[from] crate::io::write::VisWriteError),
 
     #[error(transparent)]
-    Fitsio(#[from] fitsio::errors::Error),
+    Fitsio(#[from] crate::fitsio::errors::Error),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),

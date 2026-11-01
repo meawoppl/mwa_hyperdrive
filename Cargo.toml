@@ -51,6 +51,15 @@ cuda-static = ["mwa_hyperbeam/cuda-static"]
 # Link all C dependencies statically
 all-static = ["hdf5-static", "cfitsio-static", "cuda-static"]
 
+# Read and write FITS files with the pure-Rust fitsio-pure crate instead of
+# cfitsio, here and in birli, marlu and mwalib.
+fitsio-pure = [
+    "dep:fitsio-pure",
+    "birli/fitsio-pure",
+    "marlu/fitsio-pure",
+    "mwalib/fitsio-pure",
+]
+
 [dependencies]
 birli = { version = "0.21.0", default-features = false }
 bytemuck = "1.13.1"
@@ -98,6 +107,9 @@ cuda-runtime-sys = { version = "0.3.0-alpha.1", optional = true }
 
 # "hip" feature
 hip-sys = { version = "0.1.0", optional = true }
+
+# "fitsio-pure" feature
+fitsio-pure = { version = "0.25.0", features = ["compat"], optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"

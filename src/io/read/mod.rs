@@ -17,6 +17,8 @@ pub(crate) use raw::{pfb_gains, RawReadError};
 pub use raw::{RawDataCorrections, RawDataReader};
 pub(crate) use uvfits::UvfitsReadError;
 pub use uvfits::UvfitsReader;
+#[cfg(test)]
+pub(crate) use uvfits::{read_group_data, read_group_params};
 
 use std::collections::HashSet;
 

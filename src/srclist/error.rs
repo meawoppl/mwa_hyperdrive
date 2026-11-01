@@ -406,7 +406,7 @@ pub(crate) enum WriteSourceListError {
     Sexagesimal(#[from] marlu::sexagesimal::SexagesimalError),
 
     #[error(transparent)]
-    Fitsio(#[from] fitsio::errors::Error),
+    Fitsio(#[from] crate::fitsio::errors::Error),
 
     #[error(transparent)]
     Fits(#[from] crate::io::read::fits::FitsError),

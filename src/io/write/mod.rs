@@ -5,6 +5,7 @@
 //! Code to handle writing out visibilities.
 
 mod error;
+pub(crate) mod fits;
 #[cfg(test)]
 mod tests;
 pub(crate) use error::{FileWriteError, VisWriteError};

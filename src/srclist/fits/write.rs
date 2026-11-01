@@ -1,14 +1,16 @@
-use std::{ffi::CString, path::Path};
+use std::path::Path;
 
 use super::REF_FREQ_HZ;
-use crate::{
-    io::read::fits::fits_open_hdu,
-    srclist::{error::WriteSourceListError, ComponentType, FluxDensityType, SourceList},
-};
-use fitsio::{
-    errors::check_status as fits_check_status,
+use crate::fitsio::{
     tables::{ColumnDataType, ColumnDescription},
     FitsFile,
+};
+use crate::{
+    io::{
+        read::fits::fits_open_hdu,
+        write::fits::{write_cmdline, write_comment, write_longwarn},
+    },
+    srclist::{error::WriteSourceListError, ComponentType, FluxDensityType, SourceList},
 };
 
 pub(crate) fn write_source_list_jack(
@@ -21,31 +23,20 @@ pub(crate) fn write_source_list_jack(
     }
     let mut fptr = FitsFile::create(file).open()?;
     let hdu = fits_open_hdu(&mut fptr, 0)?;
-    let mut status = 0;
-
     // Signal that we're using long strings.
-    unsafe {
-        // ffplsw = fits_write_key_longwarn
-        fitsio_sys::ffplsw(
-            fptr.as_raw(), /* I - FITS file pointer  */
-            &mut status,   /* IO - error status       */
-        );
-        fits_check_status(status)?;
-    }
+    write_longwarn(&mut fptr, &hdu)?;
 
     // Write the documentation URL as a comment.
-    unsafe {
-        let comm = CString::new("The contents of this file are documented at:").unwrap();
-        // ffpcom = fits_write_comment
-        fitsio_sys::ffpcom(fptr.as_raw(), comm.as_ptr(), &mut status);
-        fits_check_status(status)?;
-        let comm = CString::new(
-            "https://mwatelescope.github.io/mwa_hyperdrive/defs/source_list_fits_jack.html",
-        )
-        .unwrap();
-        fitsio_sys::ffpcom(fptr.as_raw(), comm.as_ptr(), &mut status);
-        fits_check_status(status)?;
-    }
+    write_comment(
+        &mut fptr,
+        &hdu,
+        "The contents of this file are documented at:",
+    )?;
+    write_comment(
+        &mut fptr,
+        &hdu,
+        "https://mwatelescope.github.io/mwa_hyperdrive/defs/source_list_fits_jack.html",
+    )?;
 
     hdu.write_key(
         &mut fptr,
@@ -57,34 +48,7 @@ pub(crate) fn write_source_list_jack(
         ),
     )?;
 
-    // Write out the current command-line call ("CMDLINE").
-    unsafe {
-        // It's possible that the command-line call has invalid UTF-8. So use
-        // args_os and attempt to convert to UTF-8 strings. If there are
-        // problems on the way, don't bother trying to write the CMDLINE key.
-        match std::env::args_os()
-            .map(|a| a.into_string())
-            .collect::<Result<Vec<String>, _>>()
-            .and_then(|v| CString::new(v.join(" ")).map_err(|_| std::ffi::OsString::from("")))
-        {
-            // This represents failure to convert an argument to UTF-8.
-            Err(_) => (),
-            Ok(value) => {
-                let key_name = CString::new("CMDLINE").unwrap();
-                let comment = CString::new("Command-line call").unwrap();
-                let mut status = 0;
-                // ffpkls = fits_write_key_longstr
-                fitsio_sys::ffpkls(
-                    fptr.as_raw(),     /* I - FITS file pointer        */
-                    key_name.as_ptr(), /* I - name of keyword to write */
-                    value.as_ptr(),    /* I - keyword value            */
-                    comment.as_ptr(),  /* I - keyword comment          */
-                    &mut status,       /* IO - error status            */
-                );
-                fits_check_status(status)?;
-            }
-        }
-    }
+    write_cmdline(&mut fptr, &hdu)?;
 
     // build the components and shapelets tables
     let mut unq_source_id = Vec::new();

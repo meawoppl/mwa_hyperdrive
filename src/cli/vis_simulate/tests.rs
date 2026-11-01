@@ -14,6 +14,7 @@ use mwalib::{MetafitsContext, Pol};
 use serial_test::serial;
 use tempfile::TempDir;
 
+use crate::io::read::{read_group_data, read_group_params};
 use crate::{
     cli::vis_simulate::VisSimulateArgs,
     io::read::fits::{fits_get_col, fits_get_required_key, fits_open, fits_open_hdu},
@@ -60,8 +61,8 @@ fn get_reduced_1090008640(
 }
 
 fn read_uvfits_stabxyz(
-    fptr: &mut fitsio::FitsFile,
-    hdu: &fitsio::hdu::FitsHdu,
+    fptr: &mut crate::fitsio::FitsFile,
+    hdu: &crate::fitsio::hdu::FitsHdu,
     num_tiles: usize,
 ) -> Vec<XyzGeodetic> {
     let xyz: Vec<f64> = hdu
@@ -180,30 +181,9 @@ fn test_1090008640_vis_simulate_autos() {
         let hdu0 = fits_open_hdu(&mut uvfits, 0).unwrap();
         let mut group_params = vec![0.0; pcount];
         let mut vis: Vec<f32> = vec![0.0; num_chans * 4 * 3];
-        let mut status = 0;
-        unsafe {
-            // ffggpe = fits_read_grppar_flt
-            fitsio_sys::ffggpe(
-                uvfits.as_raw(),           /* I - FITS file pointer                       */
-                1,                         /* I - group to read (1 = 1st group)           */
-                1,                         /* I - first vector element to read (1 = 1st)  */
-                group_params.len() as i64, /* I - number of values to read                */
-                group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut status,               /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
-            // ffgpve = fits_read_img_flt
-            fitsio_sys::ffgpve(
-                uvfits.as_raw(),  /* I - FITS file pointer                       */
-                1,                /* I - group to read (1 = 1st group)           */
-                1,                /* I - first vector element to read (1 = 1st)  */
-                vis.len() as i64, /* I - number of values to read                */
-                0.0,              /* I - value for undefined pixels              */
-                vis.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut 0,           /* O - set to 1 if any values are null; else 0 */
-                &mut status,      /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
+        {
+            read_group_params(&mut uvfits, 0, &mut group_params).unwrap();
+            read_group_data(&mut uvfits, 0, &mut vis).unwrap();
         };
 
         // check first group params and vis
@@ -237,29 +217,9 @@ fn test_1090008640_vis_simulate_autos() {
         }
 
         // now read the last row
-        unsafe {
-            // ffggpe = fits_read_grppar_flt
-            fitsio_sys::ffggpe(
-                uvfits.as_raw(),           /* I - FITS file pointer                       */
-                expected_rows as i64,      /* I - group to read (1 = 1st group)           */
-                1,                         /* I - first vector element to read (1 = 1st)  */
-                group_params.len() as i64, /* I - number of values to read                */
-                group_params.as_mut_ptr(), /* O - array of values that are returned       */
-                &mut status,               /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
-            // ffgpve = fits_read_img_flt
-            fitsio_sys::ffgpve(
-                uvfits.as_raw(),      /* I - FITS file pointer                       */
-                expected_rows as i64, /* I - group to read (1 = 1st group)           */
-                1,                    /* I - first vector element to read (1 = 1st)  */
-                vis.len() as i64,     /* I - number of values to read                */
-                0.0,                  /* I - value for undefined pixels              */
-                vis.as_mut_ptr(),     /* O - array of values that are returned       */
-                &mut 0,               /* O - set to 1 if any values are null; else 0 */
-                &mut status,          /* IO - error status                           */
-            );
-            assert_eq!(status, 0, "Status wasn't 0");
+        {
+            read_group_params(&mut uvfits, expected_rows - 1, &mut group_params).unwrap();
+            read_group_data(&mut uvfits, expected_rows - 1, &mut vis).unwrap();
         };
         drop(hdu0);
         drop(uvfits);
@@ -328,30 +288,9 @@ fn cpu_gpu_match(beam_args: &[&str]) {
 
     let mut group_params = [0.0; 5];
     let mut vis_cpu = Array4::default((num_timesteps, num_chans, 4, 3));
-    let mut status = 0;
-    unsafe {
-        // ffggpe = fits_read_grppar_flt
-        fitsio_sys::ffggpe(
-            uvfits.as_raw(),           /* I - FITS file pointer                       */
-            1,                         /* I - group to read (1 = 1st group)           */
-            1,                         /* I - first vector element to read (1 = 1st)  */
-            group_params.len() as i64, /* I - number of values to read                */
-            group_params.as_mut_ptr(), /* O - array of values that are returned       */
-            &mut status,               /* IO - error status                           */
-        );
-        assert_eq!(status, 0, "Status wasn't 0");
-        // ffgpve = fits_read_img_flt
-        fitsio_sys::ffgpve(
-            uvfits.as_raw(),      /* I - FITS file pointer                       */
-            1,                    /* I - group to read (1 = 1st group)           */
-            1,                    /* I - first vector element to read (1 = 1st)  */
-            vis_cpu.len() as i64, /* I - number of values to read                */
-            0.0,                  /* I - value for undefined pixels              */
-            vis_cpu.as_mut_ptr(), /* O - array of values that are returned       */
-            &mut 0,               /* O - set to 1 if any values are null; else 0 */
-            &mut status,          /* IO - error status                           */
-        );
-        assert_eq!(status, 0, "Status wasn't 0");
+    {
+        read_group_params(&mut uvfits, 0, &mut group_params).unwrap();
+        read_group_data(&mut uvfits, 0, &mut vis_cpu).unwrap();
     };
     drop(hdu);
     drop(uvfits);
@@ -366,29 +305,9 @@ fn cpu_gpu_match(beam_args: &[&str]) {
     let hdu = fits_open_hdu(&mut uvfits, 0).unwrap();
 
     let mut vis_gpu = Array4::default((num_timesteps, num_chans, 4, 3));
-    unsafe {
-        // ffggpe = fits_read_grppar_flt
-        fitsio_sys::ffggpe(
-            uvfits.as_raw(),           /* I - FITS file pointer                       */
-            1,                         /* I - group to read (1 = 1st group)           */
-            1,                         /* I - first vector element to read (1 = 1st)  */
-            group_params.len() as i64, /* I - number of values to read                */
-            group_params.as_mut_ptr(), /* O - array of values that are returned       */
-            &mut status,               /* IO - error status                           */
-        );
-        assert_eq!(status, 0, "Status wasn't 0");
-        // ffgpve = fits_read_img_flt
-        fitsio_sys::ffgpve(
-            uvfits.as_raw(),      /* I - FITS file pointer                       */
-            1,                    /* I - group to read (1 = 1st group)           */
-            1,                    /* I - first vector element to read (1 = 1st)  */
-            vis_gpu.len() as i64, /* I - number of values to read                */
-            0.0,                  /* I - value for undefined pixels              */
-            vis_gpu.as_mut_ptr(), /* O - array of values that are returned       */
-            &mut 0,               /* O - set to 1 if any values are null; else 0 */
-            &mut status,          /* IO - error status                           */
-        );
-        assert_eq!(status, 0, "Status wasn't 0");
+    {
+        read_group_params(&mut uvfits, 0, &mut group_params).unwrap();
+        read_group_data(&mut uvfits, 0, &mut vis_gpu).unwrap();
     };
     drop(hdu);
     drop(uvfits);
