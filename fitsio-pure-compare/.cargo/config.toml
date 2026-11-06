@@ -1,0 +1,11 @@
+# Every crate in the chain builds against the sibling checkouts in this
+# directory, with one shared target dir. Paths are relative to this
+# directory (the one containing .cargo/).
+[build]
+target-dir = "target"
+incremental = false
+
+[patch.crates-io]
+mwalib = { path = "mwalib" }
+marlu = { path = "Marlu" }
+birli = { path = "Birli" }
